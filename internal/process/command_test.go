@@ -3,7 +3,9 @@ package process
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -35,14 +37,7 @@ func TestOSRunnerStartAndStop(t *testing.T) {
 		t.Fatalf("Stop() error = %v", err)
 	}
 
-	select {
-	case _, ok := <-proc.Done():
-		if ok {
-			t.Fatal("Done() channel should be closed after process exits")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("process did not exit")
-	}
+	assertDoneClosed(t, proc.Done())
 }
 
 func TestOSRunnerStartMissingPathIncludesProcessName(t *testing.T) {
@@ -59,13 +54,52 @@ func TestOSRunnerStartMissingPathIncludesProcessName(t *testing.T) {
 	}
 }
 
+func TestOSProcessStopAlreadyExitedReturnsNilWithExpiredContext(t *testing.T) {
+	proc := &osProcess{
+		name:   "already-exited",
+		cmd:    startExitedTestCommand(t),
+		done:   delayedDone(nil, 20*time.Millisecond),
+		waited: closedWaited(),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := proc.Stop(ctx); err != nil {
+		t.Fatalf("Stop() error = %v, want nil", err)
+	}
+}
+
+func TestOSProcessStopReturnsUnexpectedWaitError(t *testing.T) {
+	waitErr := fmt.Errorf("wait failed")
+	proc := &osProcess{
+		name:    "bad-wait",
+		cmd:     startExitedTestCommand(t),
+		done:    closedDone(waitErr),
+		waited:  closedWaited(),
+		waitErr: waitErr,
+	}
+
+	err := proc.Stop(context.Background())
+	if !errors.Is(err, waitErr) {
+		t.Fatalf("Stop() error = %v, want wrapped wait error", err)
+	}
+	if !strings.Contains(err.Error(), "bad-wait") {
+		t.Fatalf("Stop() error = %q, want process name", err.Error())
+	}
+}
+
+func TestProcessExitHelper(t *testing.T) {
+}
+
 func TestOSProcessStopReturnsContextErrorAfterKillOnTimeout(t *testing.T) {
 	readyPath := filepath.Join(t.TempDir(), "ready")
 	if os.Getenv("HATH_PROCESS_IGNORE_TERM_HELPER") == "1" {
 		ignoreTerminationSignals()
 		if err := os.WriteFile(os.Getenv("HATH_PROCESS_READY_FILE"), []byte("ready"), 0o600); err != nil {
-			panic(err)
+			_, _ = fmt.Fprintf(os.Stderr, "write ready file: %v\n", err)
+			os.Exit(2)
 		}
+		// Wait until Stop escalates from SIGTERM to SIGKILL.
 		select {}
 	}
 
@@ -95,6 +129,56 @@ func TestOSProcessStopReturnsContextErrorAfterKillOnTimeout(t *testing.T) {
 	case <-proc.Done():
 	case <-time.After(time.Second):
 		t.Fatal("process did not exit after timeout kill")
+	}
+}
+
+func startExitedTestCommand(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=TestProcessExitHelper")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	return cmd
+}
+
+func closedDone(err error) chan error {
+	done := make(chan error, 1)
+	done <- err
+	close(done)
+	return done
+}
+
+func delayedDone(err error, delay time.Duration) chan error {
+	done := make(chan error, 1)
+	go func() {
+		time.Sleep(delay)
+		done <- err
+		close(done)
+	}()
+	return done
+}
+
+func closedWaited() chan struct{} {
+	waited := make(chan struct{})
+	close(waited)
+	return waited
+}
+
+func assertDoneClosed(t *testing.T, done <-chan error) {
+	t.Helper()
+	for {
+		select {
+		case _, ok := <-done:
+			if !ok {
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatal("process did not exit")
+		}
 	}
 }
 
