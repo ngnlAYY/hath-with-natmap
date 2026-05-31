@@ -8,7 +8,7 @@ func TestParseNotifyArgsParsesTCPMapping(t *testing.T) {
 		"45678",
 		"192.0.2.20",
 		"16000",
-		"tcp",
+		"TCP",
 		"10.0.0.2",
 	})
 	if err != nil {
@@ -20,11 +20,75 @@ func TestParseNotifyArgsParsesTCPMapping(t *testing.T) {
 		PublicPort:     45678,
 		IP4P:           "192.0.2.20",
 		PrivatePort:    16000,
-		Protocol:       "tcp",
+		Protocol:       "TCP",
 		PrivateAddress: "10.0.0.2",
 	}
 	if mapping != expected {
 		t.Fatalf("ParseNotifyArgs() = %#v, want %#v", mapping, expected)
+	}
+}
+
+func TestParseNotifyArgsNormalizesTCPProtocol(t *testing.T) {
+	mapping, err := ParseNotifyArgs([]string{
+		"203.0.113.10",
+		"45678",
+		"192.0.2.20",
+		"16000",
+		"Tcp",
+		"10.0.0.2",
+	})
+	if err != nil {
+		t.Fatalf("ParseNotifyArgs returned error: %v", err)
+	}
+	if mapping.Protocol != "TCP" {
+		t.Fatalf("Protocol = %q, want TCP", mapping.Protocol)
+	}
+}
+
+func TestParseNotifyArgsAcceptsPortBoundaries(t *testing.T) {
+	tests := []struct {
+		name        string
+		publicPort  string
+		privatePort string
+		wantPublic  int
+		wantPrivate int
+	}{
+		{
+			name:        "minimum ports",
+			publicPort:  "1",
+			privatePort: "1",
+			wantPublic:  1,
+			wantPrivate: 1,
+		},
+		{
+			name:        "maximum ports",
+			publicPort:  "65535",
+			privatePort: "65535",
+			wantPublic:  65535,
+			wantPrivate: 65535,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mapping, err := ParseNotifyArgs([]string{
+				"203.0.113.10",
+				tt.publicPort,
+				"192.0.2.20",
+				tt.privatePort,
+				"TCP",
+				"10.0.0.2",
+			})
+			if err != nil {
+				t.Fatalf("ParseNotifyArgs returned error: %v", err)
+			}
+			if mapping.PublicPort != tt.wantPublic {
+				t.Fatalf("PublicPort = %d, want %d", mapping.PublicPort, tt.wantPublic)
+			}
+			if mapping.PrivatePort != tt.wantPrivate {
+				t.Fatalf("PrivatePort = %d, want %d", mapping.PrivatePort, tt.wantPrivate)
+			}
+		})
 	}
 }
 
@@ -55,12 +119,36 @@ func TestParseNotifyArgsRejectsInvalidPorts(t *testing.T) {
 		args []string
 	}{
 		{
-			name: "public port",
-			args: []string{"203.0.113.10", "invalid", "192.0.2.20", "16000", "tcp", "10.0.0.2"},
+			name: "public port text",
+			args: []string{"203.0.113.10", "invalid", "192.0.2.20", "16000", "TCP", "10.0.0.2"},
 		},
 		{
-			name: "private port",
-			args: []string{"203.0.113.10", "45678", "192.0.2.20", "invalid", "tcp", "10.0.0.2"},
+			name: "private port text",
+			args: []string{"203.0.113.10", "45678", "192.0.2.20", "invalid", "TCP", "10.0.0.2"},
+		},
+		{
+			name: "zero public port",
+			args: []string{"203.0.113.10", "0", "192.0.2.20", "16000", "TCP", "10.0.0.2"},
+		},
+		{
+			name: "negative public port",
+			args: []string{"203.0.113.10", "-1", "192.0.2.20", "16000", "TCP", "10.0.0.2"},
+		},
+		{
+			name: "too large public port",
+			args: []string{"203.0.113.10", "65536", "192.0.2.20", "16000", "TCP", "10.0.0.2"},
+		},
+		{
+			name: "zero private port",
+			args: []string{"203.0.113.10", "45678", "192.0.2.20", "0", "TCP", "10.0.0.2"},
+		},
+		{
+			name: "negative private port",
+			args: []string{"203.0.113.10", "45678", "192.0.2.20", "-1", "TCP", "10.0.0.2"},
+		},
+		{
+			name: "too large private port",
+			args: []string{"203.0.113.10", "45678", "192.0.2.20", "65536", "TCP", "10.0.0.2"},
 		},
 	}
 
@@ -75,10 +163,10 @@ func TestParseNotifyArgsRejectsInvalidPorts(t *testing.T) {
 }
 
 func TestSamePublicEndpoint(t *testing.T) {
-	base := Mapping{PublicAddress: "203.0.113.10", PublicPort: 45678, Protocol: "tcp"}
-	same := Mapping{PublicAddress: "203.0.113.10", PublicPort: 45678, Protocol: "tcp", PrivatePort: 16000}
-	differentAddress := Mapping{PublicAddress: "203.0.113.11", PublicPort: 45678, Protocol: "tcp"}
-	differentPort := Mapping{PublicAddress: "203.0.113.10", PublicPort: 45679, Protocol: "tcp"}
+	base := Mapping{PublicAddress: "203.0.113.10", PublicPort: 45678, Protocol: "TCP"}
+	same := Mapping{PublicAddress: "203.0.113.10", PublicPort: 45678, Protocol: "TCP", PrivatePort: 16000}
+	differentAddress := Mapping{PublicAddress: "203.0.113.11", PublicPort: 45678, Protocol: "TCP"}
+	differentPort := Mapping{PublicAddress: "203.0.113.10", PublicPort: 45679, Protocol: "TCP"}
 	differentProtocol := Mapping{PublicAddress: "203.0.113.10", PublicPort: 45678, Protocol: "udp"}
 
 	if !base.SamePublicEndpoint(same) {
