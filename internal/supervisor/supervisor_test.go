@@ -65,6 +65,24 @@ func (f *fakeUpdater) UpdatePort(ctx context.Context, port int) error {
 	return nil
 }
 
+func TestHandleMappingNilCoordinatorReturnsErrorWithoutPanic(t *testing.T) {
+	var coordinator *Coordinator
+
+	assertHandleMappingError(t, coordinator, "supervisor 协调器未初始化")
+}
+
+func TestHandleMappingNilHathReturnsErrorWithoutPanic(t *testing.T) {
+	coordinator := &Coordinator{Updater: &fakeUpdater{}}
+
+	assertHandleMappingError(t, coordinator, "hath 控制器未配置")
+}
+
+func TestHandleMappingNilUpdaterReturnsErrorWithoutPanic(t *testing.T) {
+	coordinator := &Coordinator{Hath: &fakeHath{}}
+
+	assertHandleMappingError(t, coordinator, "端口更新器未配置")
+}
+
 func TestHandleMappingFirstMappingUpdatesPublicPortAndStartsWithPrivatePort(t *testing.T) {
 	ctx := context.Background()
 	mapping := testMapping("203.0.113.10", 50000, 7000)
@@ -209,6 +227,24 @@ func testMapping(publicAddress string, publicPort int, privatePort int) natmap.M
 		PrivatePort:    privatePort,
 		Protocol:       "TCP",
 		PrivateAddress: "192.0.2.10",
+	}
+}
+
+func assertHandleMappingError(t *testing.T, coordinator *Coordinator, message string) {
+	t.Helper()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("HandleMapping panicked: %v", recovered)
+		}
+	}()
+
+	err := coordinator.HandleMapping(context.Background(), testMapping("203.0.113.10", 50000, 7000))
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), message) {
+		t.Fatalf("expected error %q to contain %q", err.Error(), message)
 	}
 }
 

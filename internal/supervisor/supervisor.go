@@ -25,6 +25,16 @@ type Coordinator struct {
 }
 
 func (c *Coordinator) HandleMapping(ctx context.Context, mapping natmap.Mapping) error {
+	if c == nil {
+		return fmt.Errorf("supervisor 协调器未初始化")
+	}
+	if c.Hath == nil {
+		return fmt.Errorf("hath 控制器未配置")
+	}
+	if c.Updater == nil {
+		return fmt.Errorf("端口更新器未配置")
+	}
+
 	if c.CurrentMapping.SamePublicEndpoint(mapping) {
 		if c.Hath.Running() {
 			log.Printf("映射未变化且 hath-rust 正在运行，跳过处理")
