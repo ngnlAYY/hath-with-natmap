@@ -138,8 +138,8 @@ func (p *osProcess) hasExited() bool {
 	case <-p.waited:
 		return true
 	default:
+		return false
 	}
-	return p.cmd.ProcessState != nil && p.cmd.ProcessState.Exited()
 }
 
 func (p *osProcess) waitError(err error, afterStop bool) error {
