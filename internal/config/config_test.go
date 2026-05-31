@@ -120,3 +120,35 @@ func TestValidateRejectsEnabledProxyWithoutURL(t *testing.T) {
 		t.Fatalf("Load() error = %v, want proxy.url validation error", err)
 	}
 }
+
+func TestValidateRejectsUnsupportedProxyScheme(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "url: http://127.0.0.1:8080", "url: ftp://127.0.0.1:8080", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "http、https 或 socks5") {
+		t.Fatalf("Load() error = %v, want unsupported proxy scheme validation error", err)
+	}
+}
+
+func TestEnsureWritableDirRemovesProbeFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := validConfigYAML(t, dir)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	probe := filepath.Join(cfg.Hath.DataDir, ".write-test")
+	if _, err := os.Stat(probe); !os.IsNotExist(err) {
+		t.Fatalf("probe stat error = %v, want not exist", err)
+	}
+}

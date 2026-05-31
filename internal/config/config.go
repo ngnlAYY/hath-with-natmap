@@ -153,8 +153,8 @@ func (c Config) Validate() error {
 			return err
 		}
 		parsed, err := url.Parse(c.Proxy.URL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return fmt.Errorf("proxy.url 必须是合法代理 URL")
+		if err != nil || parsed.Host == "" || !isAllowedProxyScheme(parsed.Scheme) {
+			return fmt.Errorf("proxy.url 必须是合法的 http、https 或 socks5 代理 URL")
 		}
 	}
 	if c.Bandwidth.Enabled {
@@ -212,8 +212,19 @@ func ensureWritableDir(name, path string) error {
 	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
 		return fmt.Errorf("%s 不可写: %w", name, err)
 	}
-	_ = os.Remove(probe)
+	if err := os.Remove(probe); err != nil {
+		return fmt.Errorf("清理 %s 写入探针失败: %w", name, err)
+	}
 	return nil
+}
+
+func isAllowedProxyScheme(scheme string) bool {
+	switch scheme {
+	case "http", "https", "socks5":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateLogLevel(level string) error {
