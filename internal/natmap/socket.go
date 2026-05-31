@@ -3,7 +3,9 @@ package natmap
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"sync"
@@ -62,6 +64,9 @@ func acceptNotifyLoop(listener net.Listener, events chan<- Mapping) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			if !errors.Is(err, net.ErrClosed) {
+				log.Printf("接收 natmap notify 连接失败: %v", err)
+			}
 			return
 		}
 		handlers.Add(1)
@@ -79,6 +84,7 @@ func handleNotifyConn(conn net.Conn, events chan<- Mapping) {
 	for scanner.Scan() {
 		var mapping Mapping
 		if err := json.Unmarshal(scanner.Bytes(), &mapping); err != nil {
+			log.Printf("解析 natmap notify 事件失败: %v", err)
 			continue
 		}
 		events <- mapping

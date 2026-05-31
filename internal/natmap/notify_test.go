@@ -1,6 +1,14 @@
 package natmap
 
-import "testing"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"strings"
+	"testing"
+)
 
 func TestParseNotifyArgsParsesTCPMapping(t *testing.T) {
 	mapping, err := ParseNotifyArgs([]string{
@@ -159,6 +167,58 @@ func TestParseNotifyArgsRejectsInvalidPorts(t *testing.T) {
 				t.Fatal("ParseNotifyArgs returned nil error for invalid port")
 			}
 		})
+	}
+}
+
+func TestHandleNotifyConnLogsInvalidJSONAndContinues(t *testing.T) {
+	var logs bytes.Buffer
+	previousOutput := log.Writer()
+	previousFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(previousOutput)
+		log.SetFlags(previousFlags)
+	})
+
+	client, server := net.Pipe()
+	events := make(chan Mapping, 1)
+	done := make(chan struct{})
+	go func() {
+		handleNotifyConn(server, events)
+		close(done)
+	}()
+
+	want := Mapping{
+		PublicAddress:  "203.0.113.10",
+		PublicPort:     45678,
+		IP4P:           "192.0.2.20",
+		PrivatePort:    16000,
+		Protocol:       "TCP",
+		PrivateAddress: "10.0.0.2",
+	}
+	if _, err := fmt.Fprintln(client, "not-json"); err != nil {
+		t.Fatalf("write invalid notify payload: %v", err)
+	}
+	if err := json.NewEncoder(client).Encode(want); err != nil {
+		t.Fatalf("write valid notify payload: %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("close notify client: %v", err)
+	}
+
+	<-done
+
+	select {
+	case got := <-events:
+		if got != want {
+			t.Fatalf("handleNotifyConn emitted %#v, want %#v", got, want)
+		}
+	default:
+		t.Fatal("handleNotifyConn did not emit valid mapping after invalid JSON")
+	}
+	if !strings.Contains(logs.String(), "解析 natmap notify 事件失败") {
+		t.Fatalf("log output = %q, want Chinese JSON parse context", logs.String())
 	}
 }
 
