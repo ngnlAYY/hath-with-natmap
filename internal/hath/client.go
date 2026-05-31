@@ -31,7 +31,7 @@ func (c Config) Args(port int) []string {
 		"--port", strconv.Itoa(port),
 	}
 
-	if c.UseProxy {
+	if c.UseProxy && c.ProxyURL != "" {
 		args = append(args, "--proxy", c.ProxyURL)
 	}
 	if c.ForceBackgroundScan {
@@ -49,8 +49,15 @@ func (c Config) Args(port int) []string {
 
 // WriteClientLogin writes hath-rust's client_login credential file.
 func (c Config) WriteClientLogin() error {
+	if c.ClientID == "" {
+		return fmt.Errorf("ClientID 不能为空")
+	}
+	if c.ClientKey == "" {
+		return fmt.Errorf("ClientKey 不能为空")
+	}
+
 	dataDir := filepath.Join(c.DataDir, "data")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return fmt.Errorf("创建 hath 数据目录失败: %w", err)
 	}
 

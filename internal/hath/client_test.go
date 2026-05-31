@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,27 @@ func TestArgsOmitsOptionalFlagsWhenDisabled(t *testing.T) {
 		DataDir:  "/data/hath",
 		LogLevel: "unknown",
 		ProxyURL: "http://127.0.0.1:8080",
+	}
+	got := cfg.Args(8080)
+	want := []string{
+		"--cache-dir", "/data/hath/cache",
+		"--data-dir", "/data/hath/data",
+		"--download-dir", "/data/hath/download",
+		"--log-dir", "/data/hath/log",
+		"--temp-dir", "/data/hath/tmp",
+		"--port", "8080",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Args() = %#v, want %#v", got, want)
+	}
+}
+
+func TestArgsOmitsProxyWhenProxyURLEmpty(t *testing.T) {
+	cfg := Config{
+		DataDir:  "/data/hath",
+		UseProxy: true,
+		ProxyURL: "",
+		LogLevel: "debug",
 	}
 	got := cfg.Args(8080)
 	want := []string{
@@ -95,12 +117,34 @@ func TestWriteClientLogin(t *testing.T) {
 	if string(content) != "12345-secret" {
 		t.Fatalf("client_login = %q", string(content))
 	}
+	dataInfo, err := os.Stat(filepath.Join(dir, "data"))
+	if err != nil {
+		t.Fatalf("读取 data 目录权限失败: %v", err)
+	}
+	if got := dataInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("data directory permissions = %v, want %v", got, os.FileMode(0o700))
+	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("读取 client_login 权限失败: %v", err)
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("client_login permissions = %v, want %v", got, os.FileMode(0o600))
+	}
+}
+
+func TestWriteClientLoginRejectsEmptyClientID(t *testing.T) {
+	cfg := Config{DataDir: t.TempDir(), ClientKey: "secret"}
+	if err := cfg.WriteClientLogin(); err == nil || !strings.Contains(err.Error(), "ClientID 不能为空") {
+		t.Fatalf("WriteClientLogin() error = %v, want ClientID 不能为空", err)
+	}
+}
+
+func TestWriteClientLoginRejectsEmptyClientKey(t *testing.T) {
+	cfg := Config{DataDir: t.TempDir(), ClientID: "12345"}
+	if err := cfg.WriteClientLogin(); err == nil || !strings.Contains(err.Error(), "ClientKey 不能为空") {
+		t.Fatalf("WriteClientLogin() error = %v, want ClientKey 不能为空", err)
 	}
 }
 
