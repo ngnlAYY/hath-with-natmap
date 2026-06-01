@@ -21,6 +21,7 @@ type Spec struct {
 type Process interface {
 	Done() <-chan error
 	Stop(ctx context.Context) error
+	PID() int
 }
 
 type Runner interface {
@@ -70,6 +71,13 @@ func (OSRunner) Start(ctx context.Context, spec Spec) (Process, error) {
 
 func (p *osProcess) Done() <-chan error {
 	return p.done
+}
+
+func (p *osProcess) PID() int {
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
 }
 
 func (p *osProcess) setWaitErr(err error) {

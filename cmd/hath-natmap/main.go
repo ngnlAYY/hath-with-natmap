@@ -21,15 +21,15 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
-	if len(os.Args) > 1 && os.Args[1] == "notify" {
-		if err := natmap.SendNotify(notifySocketPath(), os.Args[2:]); err != nil {
+	configPath := flag.String("config", config.DefaultConfigPath, "配置文件路径")
+	flag.Parse()
+	args := flag.Args()
+	if len(args) > 0 && args[0] == "notify" {
+		if err := natmap.SendNotify(notifySocketPath(), args[1:]); err != nil {
 			log.Fatalf("发送 natmap notify 事件失败: %v", err)
 		}
 		return
 	}
-
-	configPath := flag.String("config", config.DefaultConfigPath, "配置文件路径")
-	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -67,7 +67,8 @@ func main() {
 			NotifyScript:        cfg.Natmap.NotifyScript,
 			NotifyToken:         notifyToken,
 		},
-		Runner: runner,
+		Runner:   runner,
+		Listener: listener,
 	}
 	hathController := &hath.Controller{
 		Config: hath.Config{

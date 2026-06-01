@@ -10,7 +10,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 )
 
 const DefaultNotifySocket = "/run/hath-natmap/notify.sock"
@@ -24,6 +27,8 @@ type Listener struct {
 	closeErr  error
 	connsMu   sync.Mutex
 	conns     map[net.Conn]struct{}
+	allowedMu sync.Mutex
+	allowed   map[int]struct{}
 }
 
 type notifyEnvelope struct {
@@ -76,6 +81,7 @@ func ListenNotifyWithToken(socketPath string, token string) (*Listener, <-chan M
 		done:     make(chan struct{}),
 		token:    token,
 		conns:    make(map[net.Conn]struct{}),
+		allowed:  make(map[int]struct{}),
 	}
 	go acceptNotifyLoop(notifyListener, events)
 
@@ -111,15 +117,11 @@ func SendNotify(socketPath string, args []string) error {
 	}
 	defer conn.Close()
 
-	encoder := json.NewEncoder(conn)
-	if token := os.Getenv(NotifyTokenEnv); token != "" {
-		if err := encoder.Encode(notifyEnvelope{Token: token, Mapping: mapping}); err != nil {
-			return fmt.Errorf("发送 natmap notify 事件失败: %w", err)
-		}
-		return nil
+	token := os.Getenv(NotifyTokenEnv)
+	if token == "" {
+		return fmt.Errorf("natmap notify token 未配置")
 	}
-
-	if err := encoder.Encode(mapping); err != nil {
+	if err := json.NewEncoder(conn).Encode(notifyEnvelope{Token: token, Mapping: mapping}); err != nil {
 		return fmt.Errorf("发送 natmap notify 事件失败: %w", err)
 	}
 	return nil
@@ -139,6 +141,11 @@ func acceptNotifyLoop(listener *Listener, events chan<- Mapping) {
 				log.Printf("接收 natmap notify 连接失败: %v", err)
 			}
 			return
+		}
+		if !listener.peerAllowed(conn) {
+			log.Printf("natmap notify 鉴权失败，已丢弃事件")
+			_ = conn.Close()
+			continue
 		}
 		listener.trackConn(conn)
 		handlers.Add(1)
@@ -167,6 +174,42 @@ func (l *Listener) untrackConn(conn net.Conn) {
 	delete(l.conns, conn)
 }
 
+func (l *Listener) AllowPID(pid int) {
+	if pid <= 0 {
+		return
+	}
+	l.allowedMu.Lock()
+	defer l.allowedMu.Unlock()
+	l.allowed[pid] = struct{}{}
+}
+
+func (l *Listener) peerAllowed(conn net.Conn) bool {
+	l.allowedMu.Lock()
+	defer l.allowedMu.Unlock()
+	if l.token == "" {
+		return true
+	}
+	pid, err := peerPID(conn)
+	if err != nil {
+		return false
+	}
+	return l.pidAllowed(pid)
+}
+
+func (l *Listener) pidAllowed(pid int) bool {
+	for pid > 0 {
+		if _, ok := l.allowed[pid]; ok {
+			return true
+		}
+		parent, err := parentPID(pid)
+		if err != nil || parent == pid {
+			return false
+		}
+		pid = parent
+	}
+	return false
+}
+
 func handleNotifyConn(conn net.Conn, events chan<- Mapping, done <-chan struct{}, token string) {
 	defer conn.Close()
 
@@ -190,6 +233,39 @@ func handleNotifyConn(conn net.Conn, events chan<- Mapping, done <-chan struct{}
 			log.Printf("读取 natmap notify 事件失败: %v", err)
 		}
 	}
+}
+
+func peerPID(conn net.Conn) (int, error) {
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		return 0, fmt.Errorf("natmap notify 连接不是 UnixConn")
+	}
+	file, err := unixConn.File()
+	if err != nil {
+		return 0, fmt.Errorf("获取 natmap notify 连接文件失败: %w", err)
+	}
+	defer file.Close()
+	cred, err := syscall.GetsockoptUcred(int(file.Fd()), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	if err != nil {
+		return 0, fmt.Errorf("读取 natmap notify peer credential 失败: %w", err)
+	}
+	return int(cred.Pid), nil
+}
+
+func parentPID(pid int) (int, error) {
+	content, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0, err
+	}
+	end := strings.LastIndexByte(string(content), ')')
+	if end < 0 || end+2 >= len(content) {
+		return 0, fmt.Errorf("解析进程父 PID 失败")
+	}
+	fields := strings.Fields(string(content[end+2:]))
+	if len(fields) < 2 {
+		return 0, fmt.Errorf("解析进程父 PID 失败")
+	}
+	return strconv.Atoi(fields[1])
 }
 
 func decodeNotifyMapping(payload []byte, token string) (Mapping, bool) {

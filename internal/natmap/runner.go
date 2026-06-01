@@ -3,6 +3,7 @@ package natmap
 import (
 	"context"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ngnlAYY/hath-with-natter/internal/process"
@@ -30,9 +31,11 @@ func (c RunnerConfig) Args() []string {
 }
 
 type ProcessRunner struct {
-	Config RunnerConfig
-	Runner process.Runner
-	proc   process.Process
+	Config   RunnerConfig
+	Runner   process.Runner
+	Listener *Listener
+	mu       sync.Mutex
+	proc     process.Process
 }
 
 func (r *ProcessRunner) Start(ctx context.Context) error {
@@ -46,24 +49,31 @@ func (r *ProcessRunner) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if r.Listener != nil {
+		r.Listener.AllowPID(proc.PID())
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.proc = proc
 	return nil
 }
 
 func (r *ProcessRunner) Stop(ctx context.Context) error {
-	if r.proc == nil {
-		return nil
-	}
+	r.mu.Lock()
 	proc := r.proc
 	r.proc = nil
+	r.mu.Unlock()
+	if proc == nil {
+		return nil
+	}
 	return proc.Stop(ctx)
 }
 
 func (r *ProcessRunner) Done() <-chan error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.proc == nil {
-		ch := make(chan error)
-		close(ch)
-		return ch
+		return nil
 	}
 	return r.proc.Done()
 }

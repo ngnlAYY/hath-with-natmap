@@ -98,6 +98,10 @@ func (r *Runtime) validate() error {
 }
 
 func (r *Runtime) runUntilRestart(ctx context.Context, coordinator *Coordinator) error {
+	natmapDone := r.Natmap.Done()
+	if natmapDone == nil {
+		return fmt.Errorf("natmap 进程未运行")
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -110,7 +114,7 @@ func (r *Runtime) runUntilRestart(ctx context.Context, coordinator *Coordinator)
 			if err := coordinator.HandleMapping(ctx, mapping); err != nil {
 				return fmt.Errorf("处理 natmap 映射失败: %w", err)
 			}
-		case err, ok := <-r.Natmap.Done():
+		case err, ok := <-natmapDone:
 			if !ok {
 				return fmt.Errorf("natmap 进程状态通道已关闭")
 			}

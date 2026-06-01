@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ngnlAYY/hath-with-natter/internal/process"
@@ -186,6 +187,10 @@ func (f *fakeProcess) Stop(ctx context.Context) error {
 	return nil
 }
 
+func (f *fakeProcess) PID() int {
+	return 1234
+}
+
 func TestControllerStartWritesLoginAndStartsWithPrivatePort(t *testing.T) {
 	dir := t.TempDir()
 	proc := newFakeProcess()
@@ -263,6 +268,23 @@ func TestControllerStopNoOpsWhenNotStarted(t *testing.T) {
 	if err := controller.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop returned error: %v", err)
 	}
+}
+
+func TestControllerLifecycleMethodsAreRaceSafe(t *testing.T) {
+	controller := &Controller{proc: newFakeProcess()}
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = controller.Stop(context.Background())
+		}()
+		go func() {
+			defer wg.Done()
+			_ = controller.Running()
+		}()
+	}
+	wg.Wait()
 }
 
 func quietFlagsFromArgs(args []string) []string {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -59,10 +60,11 @@ func (f *fakeProcessRunner) Start(ctx context.Context, spec process.Spec) (proce
 type fakeProcess struct {
 	done  chan error
 	stops int
+	pid   int
 }
 
 func newFakeProcess() *fakeProcess {
-	return &fakeProcess{done: make(chan error, 1)}
+	return &fakeProcess{done: make(chan error, 1), pid: 1234}
 }
 
 func (f *fakeProcess) Done() <-chan error {
@@ -72,6 +74,10 @@ func (f *fakeProcess) Done() <-chan error {
 func (f *fakeProcess) Stop(ctx context.Context) error {
 	f.stops++
 	return nil
+}
+
+func (f *fakeProcess) PID() int {
+	return f.pid
 }
 
 func TestGenerateNotifyTokenReturnsHexToken(t *testing.T) {
@@ -121,6 +127,37 @@ func TestProcessRunnerStartBuildsNatmapSpec(t *testing.T) {
 	}
 	if processRunner.Done() != proc.Done() {
 		t.Fatalf("Done did not return underlying process channel")
+	}
+}
+
+func TestProcessRunnerStartAllowsStartedNatmapPID(t *testing.T) {
+	proc := newFakeProcess()
+	proc.pid = os.Getpid()
+	runner := &fakeProcessRunner{proc: proc}
+	listener := &Listener{token: "secret-token", allowed: make(map[int]struct{})}
+	processRunner := &ProcessRunner{Runner: runner, Listener: listener}
+
+	if err := processRunner.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if !listener.pidAllowed(os.Getpid()) {
+		t.Fatal("started natmap PID was not allowed")
+	}
+}
+
+func TestSendNotifyRejectsMissingNotifyToken(t *testing.T) {
+	t.Setenv(NotifyTokenEnv, "")
+	socketPath := filepath.Join(t.TempDir(), "notify.sock")
+	listener, _, err := ListenNotifyWithToken(socketPath, "secret-token")
+	if err != nil {
+		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+	}
+	defer listener.Close()
+	listener.AllowPID(os.Getpid())
+
+	err = SendNotify(socketPath, validNotifyArgs())
+	if err == nil || !strings.Contains(err.Error(), "natmap notify token 未配置") {
+		t.Fatalf("SendNotify error = %v, want missing token", err)
 	}
 }
 
@@ -176,14 +213,8 @@ func TestProcessRunnerStopAndDoneAreNoOpWhenNotStarted(t *testing.T) {
 	if err := processRunner.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop returned error: %v", err)
 	}
-
-	select {
-	case _, ok := <-processRunner.Done():
-		if ok {
-			t.Fatal("Done channel open, want closed")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Done channel did not close")
+	if processRunner.Done() != nil {
+		t.Fatal("Done channel = non-nil, want nil before start")
 	}
 }
 
@@ -198,17 +229,29 @@ func TestProcessRunnerStopStopsProcessAndClearsIt(t *testing.T) {
 		t.Fatalf("process stops = %d, want 1", proc.stops)
 	}
 
-	select {
-	case _, ok := <-processRunner.Done():
-		if ok {
-			t.Fatal("Done channel open after Stop, want closed nil-process channel")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Done channel did not close after Stop")
+	if processRunner.Done() != nil {
+		t.Fatal("Done channel = non-nil after Stop, want nil")
 	}
 }
 
-func TestListenNotifyWithTokenReceivesMatchingTokenFromSendNotify(t *testing.T) {
+func TestProcessRunnerLifecycleMethodsAreRaceSafe(t *testing.T) {
+	processRunner := &ProcessRunner{proc: newFakeProcess()}
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_ = processRunner.Stop(context.Background())
+		}()
+		go func() {
+			defer wg.Done()
+			_ = processRunner.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestListenNotifyWithTokenReceivesMatchingTokenFromAllowedSender(t *testing.T) {
 	t.Setenv(NotifyTokenEnv, "secret-token")
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
 	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
@@ -216,6 +259,7 @@ func TestListenNotifyWithTokenReceivesMatchingTokenFromSendNotify(t *testing.T) 
 		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
 	}
 	defer listener.Close()
+	listener.AllowPID(os.Getpid())
 
 	if err := SendNotify(socketPath, validNotifyArgs()); err != nil {
 		t.Fatalf("SendNotify returned error: %v", err)
@@ -231,6 +275,25 @@ func TestListenNotifyWithTokenReceivesMatchingTokenFromSendNotify(t *testing.T) 
 	}
 }
 
+func TestListenNotifyWithTokenRejectsUnauthorizedPeerWithMatchingToken(t *testing.T) {
+	t.Setenv(NotifyTokenEnv, "secret-token")
+	socketPath := filepath.Join(t.TempDir(), "notify.sock")
+	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
+	if err != nil {
+		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+	}
+	defer listener.Close()
+
+	logs := captureLogs(t)
+	if err := SendNotify(socketPath, validNotifyArgs()); err != nil {
+		t.Fatalf("SendNotify returned error: %v", err)
+	}
+
+	assertNoMapping(t, events)
+	waitUntilStringContains(t, logs, "natmap notify 鉴权失败")
+	assertLogDoesNotLeakNotifyContent(t, logs.String())
+}
+
 func TestListenNotifyWithTokenRejectsMissingTokenWithoutLeakingLogContent(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
 	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
@@ -238,6 +301,7 @@ func TestListenNotifyWithTokenRejectsMissingTokenWithoutLeakingLogContent(t *tes
 		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
 	}
 	defer listener.Close()
+	listener.AllowPID(os.Getpid())
 
 	logs := captureLogs(t)
 	if err := sendRawNotify(socketPath, `{"PublicAddress":"203.0.113.10","PublicPort":45678,"IP4P":"192.0.2.20","PrivatePort":16000,"Protocol":"TCP","PrivateAddress":"10.0.0.2"}`); err != nil {
@@ -260,6 +324,7 @@ func TestListenNotifyWithTokenRejectsWrongTokenWithoutLeakingLogContent(t *testi
 		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
 	}
 	defer listener.Close()
+	listener.AllowPID(os.Getpid())
 
 	logs := captureLogs(t)
 	if err := sendRawNotify(socketPath, `{"token":"wrong-token","mapping":{"PublicAddress":"203.0.113.10","PublicPort":45678,"IP4P":"192.0.2.20","PrivatePort":16000,"Protocol":"TCP","PrivateAddress":"10.0.0.2"}}`); err != nil {
@@ -276,12 +341,14 @@ func TestListenNotifyWithTokenRejectsWrongTokenWithoutLeakingLogContent(t *testi
 }
 
 func TestListenNotifyReceivesMappingSentBySendNotify(t *testing.T) {
+	t.Setenv(NotifyTokenEnv, "secret-token")
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
 	listener, events, err := ListenNotify(socketPath)
 	if err != nil {
 		t.Fatalf("ListenNotify returned error: %v", err)
 	}
 	defer listener.Close()
+	listener.AllowPID(os.Getpid())
 
 	err = SendNotify(socketPath, validNotifyArgs())
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/ngnlAYY/hath-with-natter/internal/process"
 )
@@ -76,6 +77,7 @@ func (c Config) WriteClientLogin() error {
 type Controller struct {
 	Config Config
 	Runner process.Runner
+	mu     sync.Mutex
 	proc   process.Process
 }
 
@@ -92,20 +94,26 @@ func (c *Controller) Start(ctx context.Context, port int) error {
 	if err != nil {
 		return err
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.proc = proc
 	return nil
 }
 
 func (c *Controller) Stop(ctx context.Context) error {
-	if c.proc == nil {
-		return nil
-	}
+	c.mu.Lock()
 	proc := c.proc
 	c.proc = nil
+	c.mu.Unlock()
+	if proc == nil {
+		return nil
+	}
 	return proc.Stop(ctx)
 }
 
 func (c *Controller) Running() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.proc == nil {
 		return false
 	}
