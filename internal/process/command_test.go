@@ -1,14 +1,17 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -51,6 +54,110 @@ func TestOSRunnerStartMissingPathIncludesProcessName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing-helper") {
 		t.Fatalf("Start() error = %q, want process name", err.Error())
+	}
+}
+
+func TestOSRunnerPrefixesProcessOutput(t *testing.T) {
+	if os.Getenv("HATH_PROCESS_OUTPUT_HELPER") == "1" {
+		_, _ = fmt.Fprintln(os.Stdout, "stdout line")
+		_, _ = fmt.Fprintln(os.Stderr, "stderr line")
+		os.Exit(0)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := OSRunner{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	proc, err := runner.Start(context.Background(), Spec{
+		Name: "natmap",
+		Path: os.Args[0],
+		Args: []string{"-test.run=TestOSRunnerPrefixesProcessOutput"},
+		Env:  []string{"HATH_PROCESS_OUTPUT_HELPER=1"},
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	assertDoneClosed(t, proc.Done())
+
+	if got := stdout.String(); got != "[natmap] stdout line\n" {
+		t.Fatalf("stdout = %q, want prefixed line", got)
+	}
+	if got := stderr.String(); got != "[natmap] stderr line\n" {
+		t.Fatalf("stderr = %q, want prefixed line", got)
+	}
+}
+
+func TestOSRunnerSerializesOutputToSharedWriter(t *testing.T) {
+	var output bytes.Buffer
+	runner := OSRunner{Stdout: &output, Stderr: &output}
+	stdout, stderr := runner.outputWriters("natmap")
+
+	writeConcurrentLines(t, stdout, stderr)
+	assertPrefixedOutputLines(t, output.String())
+}
+
+func TestOSRunnerHandlesNonComparableOutputWriters(t *testing.T) {
+	stdout := sliceWriter{}
+	stderr := sliceWriter{}
+	runner := OSRunner{Stdout: stdout, Stderr: stderr}
+
+	out, errOut := runner.outputWriters("natmap")
+	if _, err := out.Write([]byte("stdout line\n")); err != nil {
+		t.Fatalf("stdout Write() error = %v", err)
+	}
+	if _, err := errOut.Write([]byte("stderr line\n")); err != nil {
+		t.Fatalf("stderr Write() error = %v", err)
+	}
+}
+
+type sliceWriter []byte
+
+func (w sliceWriter) Write(data []byte) (int, error) {
+	return len(data), nil
+}
+
+func writeConcurrentLines(t *testing.T, stdout io.Writer, stderr io.Writer) {
+	t.Helper()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errs := make(chan error, 2)
+	go func() {
+		defer wg.Done()
+		_, err := stdout.Write([]byte("stdout line\n"))
+		errs <- err
+	}()
+	go func() {
+		defer wg.Done()
+		_, err := stderr.Write([]byte("stderr line\n"))
+		errs <- err
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+	}
+}
+
+func assertPrefixedOutputLines(t *testing.T, output string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("output = %q, want exactly two lines", output)
+	}
+	wantLines := map[string]bool{
+		"[natmap] stdout line": false,
+		"[natmap] stderr line": false,
+	}
+	for _, line := range lines {
+		seen, ok := wantLines[line]
+		if !ok || seen {
+			t.Fatalf("unexpected line %q in output %q", line, output)
+		}
+		wantLines[line] = true
 	}
 }
 
@@ -176,7 +283,7 @@ func assertDoneClosed(t *testing.T, done <-chan error) {
 			if !ok {
 				return
 			}
-		case <-time.After(time.Second):
+		case <-time.After(5 * time.Second):
 			t.Fatal("process did not exit")
 		}
 	}

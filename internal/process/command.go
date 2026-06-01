@@ -1,11 +1,14 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"reflect"
 	"sync"
 	"syscall"
 )
@@ -28,7 +31,10 @@ type Runner interface {
 	Start(ctx context.Context, spec Spec) (Process, error)
 }
 
-type OSRunner struct{}
+type OSRunner struct {
+	Stdout io.Writer
+	Stderr io.Writer
+}
 
 type osProcess struct {
 	name    string
@@ -39,12 +45,11 @@ type osProcess struct {
 	mu      sync.Mutex
 }
 
-func (OSRunner) Start(ctx context.Context, spec Spec) (Process, error) {
+func (r OSRunner) Start(ctx context.Context, spec Spec) (Process, error) {
 	cmd := exec.CommandContext(ctx, spec.Path, spec.Args...)
 	cmd.Dir = spec.Dir
 	cmd.Env = append(os.Environ(), spec.Env...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout, cmd.Stderr = r.outputWriters(spec.Name)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
@@ -171,4 +176,101 @@ func isSignalExit(err error) bool {
 
 func isProcessDone(err error) bool {
 	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH)
+}
+
+func (r OSRunner) stdout() io.Writer {
+	if r.Stdout != nil {
+		return r.Stdout
+	}
+	return os.Stdout
+}
+
+func (r OSRunner) stderr() io.Writer {
+	if r.Stderr != nil {
+		return r.Stderr
+	}
+	return os.Stderr
+}
+
+func (r OSRunner) outputWriters(name string) (io.Writer, io.Writer) {
+	stdout := r.stdout()
+	stderr := r.stderr()
+	if sameWriter(stdout, stderr) {
+		mu := &sync.Mutex{}
+		return r.outputWriter(name, stdout, mu), r.outputWriter(name, stderr, mu)
+	}
+	return r.outputWriter(name, stdout, &sync.Mutex{}), r.outputWriter(name, stderr, &sync.Mutex{})
+}
+
+func sameWriter(left io.Writer, right io.Writer) bool {
+	leftValue := reflect.ValueOf(left)
+	rightValue := reflect.ValueOf(right)
+	if !leftValue.IsValid() || !rightValue.IsValid() {
+		return !leftValue.IsValid() && !rightValue.IsValid()
+	}
+	if leftValue.Type() != rightValue.Type() || !leftValue.Type().Comparable() {
+		return false
+	}
+	return left == right
+}
+
+func (r OSRunner) outputWriter(name string, writer io.Writer, mu *sync.Mutex) io.Writer {
+	if name == "" {
+		return writer
+	}
+	return &linePrefixWriter{prefix: []byte("[" + name + "] "), writer: writer, mu: mu, atLineStart: true}
+}
+
+type linePrefixWriter struct {
+	prefix      []byte
+	writer      io.Writer
+	mu          *sync.Mutex
+	atLineStart bool
+}
+
+func (w *linePrefixWriter) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	written := 0
+	for len(data) > 0 {
+		if w.atLineStart {
+			if _, err := writeFull(w.writer, w.prefix); err != nil {
+				return written, err
+			}
+			w.atLineStart = false
+		}
+
+		lineEnd := bytes.IndexByte(data, '\n')
+		if lineEnd == -1 {
+			n, err := writeFull(w.writer, data)
+			written += n
+			return written, err
+		}
+
+		line := data[:lineEnd+1]
+		n, err := writeFull(w.writer, line)
+		written += n
+		if err != nil {
+			return written, err
+		}
+		data = data[lineEnd+1:]
+		w.atLineStart = true
+	}
+	return written, nil
+}
+
+func writeFull(writer io.Writer, data []byte) (int, error) {
+	written := 0
+	for written < len(data) {
+		n, err := writer.Write(data[written:])
+		written += n
+		if err != nil {
+			return written, err
+		}
+		if n == 0 {
+			return written, io.ErrShortWrite
+		}
+	}
+	return written, nil
 }
