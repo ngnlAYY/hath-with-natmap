@@ -306,7 +306,7 @@ func validateNatmapFWMark(value string) error {
 		return nil
 	}
 	if _, err := strconv.ParseUint(value, 0, 32); err != nil {
-		return fmt.Errorf("natmap.fwmark 必须是十进制、八进制或 0x 十六进制无符号整数: %w", err)
+		return fmt.Errorf("natmap.fwmark 必须是十进制、八进制或 0x 十六进制无符号整数")
 	}
 	return nil
 }

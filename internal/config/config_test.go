@@ -231,6 +231,28 @@ func TestValidateRejectsInvalidNatmapAddressFamily(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsValidNatmapInterface(t *testing.T) {
+	tests := []string{"eth0", "192.168.1.2", "2001:db8::1"}
+	for _, iface := range tests {
+		t.Run(iface, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", "notify_script: /usr/local/bin/natmap-notify.sh\n  interface: '"+iface+"'", 1)
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+				t.Fatalf("写入配置失败: %v", err)
+			}
+
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Natmap.Interface != iface {
+				t.Fatalf("Natmap.Interface = %q, want %q", cfg.Natmap.Interface, iface)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsInvalidNatmapInterface(t *testing.T) {
 	tests := []string{"eth0;rm", "eth 0", "-eth0"}
 	for _, iface := range tests {
@@ -250,7 +272,30 @@ func TestValidateRejectsInvalidNatmapInterface(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsValidNatmapFWMark(t *testing.T) {
+	tests := []string{"10", "010", "0x10"}
+	for _, fwmark := range tests {
+		t.Run(fwmark, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", "notify_script: /usr/local/bin/natmap-notify.sh\n  fwmark: '"+fwmark+"'", 1)
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+				t.Fatalf("写入配置失败: %v", err)
+			}
+
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Natmap.FWMark != fwmark {
+				t.Fatalf("Natmap.FWMark = %q, want %q", cfg.Natmap.FWMark, fwmark)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsInvalidNatmapFWMark(t *testing.T) {
+	const wantError = "natmap.fwmark 必须是十进制、八进制或 0x 十六进制无符号整数"
 	tests := []string{"0x", "0xzz", "1;rm", "mark"}
 	for _, fwmark := range tests {
 		t.Run(fwmark, func(t *testing.T) {
@@ -262,8 +307,8 @@ func TestValidateRejectsInvalidNatmapFWMark(t *testing.T) {
 			}
 
 			_, err := Load(path)
-			if err == nil || !strings.Contains(err.Error(), "natmap.fwmark") {
-				t.Fatalf("Load() error = %v, want natmap.fwmark validation error", err)
+			if err == nil || err.Error() != wantError {
+				t.Fatalf("Load() error = %v, want %q", err, wantError)
 			}
 		})
 	}
