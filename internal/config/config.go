@@ -2,10 +2,13 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -16,6 +19,7 @@ const DefaultConfigPath = "/config/config.yaml"
 var (
 	bandwidthInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,14}$`)
 	bandwidthLimitPattern     = regexp.MustCompile(`^[1-9][0-9]*(bit|kbit|mbit|gbit)$`)
+	natmapInterfacePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$`)
 )
 
 type Duration struct {
@@ -63,14 +67,27 @@ type NatmapConfig struct {
 	HTTPKeepaliveServer string   `yaml:"http_keepalive_server"`
 	KeepaliveInterval   Duration `yaml:"keepalive_interval"`
 	NotifyScript        string   `yaml:"notify_script"`
+	AddressFamily       string   `yaml:"address_family"`
+	UDPMode             bool     `yaml:"udp_mode"`
+	Interface           string   `yaml:"interface"`
+	FWMark              string   `yaml:"fwmark"`
+	UDPCheckCycle       int      `yaml:"udp_check_cycle"`
 }
 
 type HathConfig struct {
-	BinaryPath          string `yaml:"binary_path"`
-	DataDir             string `yaml:"data_dir"`
-	LogLevel            string `yaml:"log_level"`
-	ForceBackgroundScan bool   `yaml:"force_background_scan"`
-	RPCServerIP         string `yaml:"rpc_server_ip"`
+	BinaryPath           string `yaml:"binary_path"`
+	DataDir              string `yaml:"data_dir"`
+	LogLevel             string `yaml:"log_level"`
+	ForceBackgroundScan  bool   `yaml:"force_background_scan"`
+	RPCServerIP          string `yaml:"rpc_server_ip"`
+	DisableLogging       bool   `yaml:"disable_logging"`
+	FlushLog             bool   `yaml:"flush_log"`
+	MaxConnection        int    `yaml:"max_connection"`
+	DisableIPOriginCheck bool   `yaml:"disable_ip_origin_check"`
+	DisableFloodControl  bool   `yaml:"disable_flood_control"`
+	EnableMetrics        bool   `yaml:"enable_metrics"`
+	DisableServerHeader  bool   `yaml:"disable_server_header"`
+	EnableH3             bool   `yaml:"enable_h3"`
 }
 
 type ProxyConfig struct {
@@ -145,6 +162,18 @@ func (c Config) Validate() error {
 	if err := requireString("natmap.notify_script", c.Natmap.NotifyScript); err != nil {
 		return err
 	}
+	if err := validateNatmapAddressFamily(c.Natmap.AddressFamily); err != nil {
+		return err
+	}
+	if err := validateNatmapInterface(c.Natmap.Interface); err != nil {
+		return err
+	}
+	if err := validateNatmapFWMark(c.Natmap.FWMark); err != nil {
+		return err
+	}
+	if c.Natmap.UDPCheckCycle < 0 {
+		return fmt.Errorf("natmap.udp_check_cycle 不能小于 0")
+	}
 	if err := requireExecutable("hath.binary_path", c.Hath.BinaryPath); err != nil {
 		return err
 	}
@@ -153,6 +182,9 @@ func (c Config) Validate() error {
 	}
 	if err := validateLogLevel(c.Hath.LogLevel); err != nil {
 		return err
+	}
+	if c.Hath.MaxConnection < 0 {
+		return fmt.Errorf("hath.max_connection 必须大于等于 0")
 	}
 	if c.Proxy.Enabled {
 		if err := requireString("proxy.url", c.Proxy.URL); err != nil {
@@ -243,6 +275,38 @@ func validateBandwidthLimit(limit string) error {
 func validateBandwidthInterface(name string) error {
 	if !bandwidthInterfacePattern.MatchString(name) {
 		return fmt.Errorf("bandwidth.interface 必须是 1 到 15 位的网络接口名")
+	}
+	return nil
+}
+
+func validateNatmapAddressFamily(addressFamily string) error {
+	switch addressFamily {
+	case "", "ipv4", "ipv6":
+		return nil
+	default:
+		return fmt.Errorf("natmap.address_family 必须是 ipv4 或 ipv6")
+	}
+}
+
+func validateNatmapInterface(value string) error {
+	if value == "" {
+		return nil
+	}
+	if ip := net.ParseIP(value); ip != nil {
+		return nil
+	}
+	if !natmapInterfacePattern.MatchString(value) || strings.Contains(value, "..") {
+		return fmt.Errorf("natmap.interface 必须是合法的网卡名或 IP 地址")
+	}
+	return nil
+}
+
+func validateNatmapFWMark(value string) error {
+	if value == "" {
+		return nil
+	}
+	if _, err := strconv.ParseUint(value, 0, 32); err != nil {
+		return fmt.Errorf("natmap.fwmark 必须是十进制、八进制或 0x 十六进制无符号整数: %w", err)
 	}
 	return nil
 }

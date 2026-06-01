@@ -79,6 +79,53 @@ func TestLoadValidConfig(t *testing.T) {
 	}
 }
 
+func TestLoadParameterWhitelistConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", `notify_script: /usr/local/bin/natmap-notify.sh
+  address_family: ipv6
+  udp_mode: true
+  interface: eth0
+  fwmark: "0x1"
+  udp_check_cycle: 12`, 1)
+	cfgText = strings.Replace(cfgText, `rpc_server_ip: ""`, `rpc_server_ip: ""
+  disable_logging: true
+  flush_log: true
+  max_connection: 128
+  disable_ip_origin_check: true
+  disable_flood_control: true
+  enable_metrics: true
+  disable_server_header: true
+  enable_h3: true`, 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Natmap.AddressFamily != "ipv6" {
+		t.Fatalf("Natmap.AddressFamily = %q, want ipv6", cfg.Natmap.AddressFamily)
+	}
+	if !cfg.Natmap.UDPMode {
+		t.Fatal("Natmap.UDPMode = false, want true")
+	}
+	if cfg.Natmap.Interface != "eth0" {
+		t.Fatalf("Natmap.Interface = %q, want eth0", cfg.Natmap.Interface)
+	}
+	if cfg.Natmap.FWMark != "0x1" {
+		t.Fatalf("Natmap.FWMark = %q, want 0x1", cfg.Natmap.FWMark)
+	}
+	if cfg.Natmap.UDPCheckCycle != 12 {
+		t.Fatalf("Natmap.UDPCheckCycle = %d, want 12", cfg.Natmap.UDPCheckCycle)
+	}
+	if !cfg.Hath.DisableLogging || !cfg.Hath.FlushLog || cfg.Hath.MaxConnection != 128 || !cfg.Hath.DisableIPOriginCheck || !cfg.Hath.DisableFloodControl || !cfg.Hath.EnableMetrics || !cfg.Hath.DisableServerHeader || !cfg.Hath.EnableH3 {
+		t.Fatalf("Hath whitelist config not loaded correctly: %+v", cfg.Hath)
+	}
+}
+
 func TestValidateRejectsMissingSecret(t *testing.T) {
 	dir := t.TempDir()
 	cfgText := strings.Replace(validConfigYAML(t, dir), `pass_hash: "example-pass-hash"`, `pass_hash: ""`, 1)
@@ -167,6 +214,86 @@ func TestValidateRejectsInvalidBandwidthInterface(t *testing.T) {
 				t.Fatalf("Load() error = %v, want bandwidth.interface validation error", err)
 			}
 		})
+	}
+}
+
+func TestValidateRejectsInvalidNatmapAddressFamily(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", "notify_script: /usr/local/bin/natmap-notify.sh\n  address_family: ipx", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "natmap.address_family") {
+		t.Fatalf("Load() error = %v, want natmap.address_family validation error", err)
+	}
+}
+
+func TestValidateRejectsInvalidNatmapInterface(t *testing.T) {
+	tests := []string{"eth0;rm", "eth 0", "-eth0"}
+	for _, iface := range tests {
+		t.Run(iface, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", "notify_script: /usr/local/bin/natmap-notify.sh\n  interface: '"+iface+"'", 1)
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+				t.Fatalf("写入配置失败: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), "natmap.interface") {
+				t.Fatalf("Load() error = %v, want natmap.interface validation error", err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsInvalidNatmapFWMark(t *testing.T) {
+	tests := []string{"0x", "0xzz", "1;rm", "mark"}
+	for _, fwmark := range tests {
+		t.Run(fwmark, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", "notify_script: /usr/local/bin/natmap-notify.sh\n  fwmark: '"+fwmark+"'", 1)
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+				t.Fatalf("写入配置失败: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), "natmap.fwmark") {
+				t.Fatalf("Load() error = %v, want natmap.fwmark validation error", err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsInvalidNatmapUDPCheckCycle(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", "notify_script: /usr/local/bin/natmap-notify.sh\n  udp_check_cycle: -1", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "natmap.udp_check_cycle") {
+		t.Fatalf("Load() error = %v, want natmap.udp_check_cycle validation error", err)
+	}
+}
+
+func TestValidateRejectsNegativeHathMaxConnection(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), `rpc_server_ip: ""`, "rpc_server_ip: \"\"\n  max_connection: -1", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "hath.max_connection") {
+		t.Fatalf("Load() error = %v, want hath.max_connection validation error", err)
 	}
 }
 
