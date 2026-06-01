@@ -79,6 +79,23 @@ func TestLoadValidConfig(t *testing.T) {
 	}
 }
 
+func TestLoadOldConfigWithoutExternalUpdateTimeoutStillLoads(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "  external_update_timeout: 60s\n", "", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Network.ExternalUpdateTimeout.Duration != 60*time.Second {
+		t.Fatalf("ExternalUpdateTimeout = %v, want 60s", cfg.Network.ExternalUpdateTimeout.Duration)
+	}
+}
+
 func TestLoadParameterWhitelistConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", `notify_script: /usr/local/bin/natmap-notify.sh

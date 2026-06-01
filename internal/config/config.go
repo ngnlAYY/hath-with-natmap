@@ -14,7 +14,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const DefaultConfigPath = "/config/config.yaml"
+const (
+	DefaultConfigPath            = "/config/config.yaml"
+	defaultExternalUpdateTimeout = 60 * time.Second
+)
 
 var (
 	bandwidthInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,14}$`)
@@ -24,6 +27,7 @@ var (
 
 type Duration struct {
 	time.Duration
+	isSet bool
 }
 
 func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
@@ -36,6 +40,7 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 		return fmt.Errorf("解析时间间隔 %q 失败: %w", text, err)
 	}
 	d.Duration = parsed
+	d.isSet = true
 	return nil
 }
 
@@ -121,6 +126,9 @@ func Load(path string) (Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(content, &cfg); err != nil {
 		return Config{}, fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	if !cfg.Network.ExternalUpdateTimeout.isSet {
+		cfg.Network.ExternalUpdateTimeout.Duration = defaultExternalUpdateTimeout
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
