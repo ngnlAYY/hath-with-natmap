@@ -39,6 +39,9 @@ func main() {
 	if err := os.MkdirAll("/run/hath-natmap", 0o700); err != nil {
 		log.Fatalf("创建运行目录失败: %v", err)
 	}
+	if err := os.Chmod("/run/hath-natmap", 0o700); err != nil {
+		log.Fatalf("设置运行目录权限失败: %v", err)
+	}
 	notifyToken, err := natmap.GenerateNotifyToken()
 	if err != nil {
 		log.Fatalf("%v", err)
