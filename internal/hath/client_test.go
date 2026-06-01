@@ -1,11 +1,14 @@
 package hath
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ngnlAYY/hath-with-natter/internal/process"
 )
 
 func TestBuildArgs(t *testing.T) {
@@ -145,6 +148,120 @@ func TestWriteClientLoginRejectsEmptyClientKey(t *testing.T) {
 	cfg := Config{DataDir: t.TempDir(), ClientID: "12345"}
 	if err := cfg.WriteClientLogin(); err == nil || !strings.Contains(err.Error(), "ClientKey 不能为空") {
 		t.Fatalf("WriteClientLogin() error = %v, want ClientKey 不能为空", err)
+	}
+}
+
+type fakeProcessRunner struct {
+	specs []process.Spec
+	proc  *fakeProcess
+	err   error
+}
+
+func (f *fakeProcessRunner) Start(ctx context.Context, spec process.Spec) (process.Process, error) {
+	f.specs = append(f.specs, spec)
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.proc == nil {
+		f.proc = newFakeProcess()
+	}
+	return f.proc, nil
+}
+
+type fakeProcess struct {
+	done  chan error
+	stops int
+}
+
+func newFakeProcess() *fakeProcess {
+	return &fakeProcess{done: make(chan error, 1)}
+}
+
+func (f *fakeProcess) Done() <-chan error {
+	return f.done
+}
+
+func (f *fakeProcess) Stop(ctx context.Context) error {
+	f.stops++
+	return nil
+}
+
+func TestControllerStartWritesLoginAndStartsWithPrivatePort(t *testing.T) {
+	dir := t.TempDir()
+	proc := newFakeProcess()
+	runner := &fakeProcessRunner{proc: proc}
+	cfg := Config{
+		BinaryPath: "/usr/local/bin/hath-rust",
+		DataDir:    dir,
+		LogLevel:   "info",
+		ClientID:   "12345",
+		ClientKey:  "secret",
+	}
+	controller := &Controller{Config: cfg, Runner: runner}
+
+	if err := controller.Start(context.Background(), 16000); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	login, err := os.ReadFile(filepath.Join(dir, "data", "client_login"))
+	if err != nil {
+		t.Fatalf("client_login was not written before start: %v", err)
+	}
+	if string(login) != "12345-secret" {
+		t.Fatalf("client_login = %q, want 12345-secret", string(login))
+	}
+	if len(runner.specs) != 1 {
+		t.Fatalf("Start calls = %d, want 1", len(runner.specs))
+	}
+	got := runner.specs[0]
+	if got.Name != "hath-rust" {
+		t.Fatalf("spec.Name = %q, want hath-rust", got.Name)
+	}
+	if got.Path != cfg.BinaryPath {
+		t.Fatalf("spec.Path = %q, want %q", got.Path, cfg.BinaryPath)
+	}
+	if !reflect.DeepEqual(got.Args, cfg.Args(16000)) {
+		t.Fatalf("spec.Args = %#v, want %#v", got.Args, cfg.Args(16000))
+	}
+	if !controller.Running() {
+		t.Fatal("Running = false, want true")
+	}
+}
+
+func TestControllerRunningClearsExitedProcess(t *testing.T) {
+	proc := newFakeProcess()
+	controller := &Controller{proc: proc}
+	proc.done <- nil
+	close(proc.done)
+
+	if controller.Running() {
+		t.Fatal("Running = true after process Done, want false")
+	}
+	if controller.proc != nil {
+		t.Fatal("controller proc was not cleared after Done")
+	}
+}
+
+func TestControllerStopStopsProcessAndClearsIt(t *testing.T) {
+	proc := newFakeProcess()
+	controller := &Controller{proc: proc}
+
+	if err := controller.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
+	}
+	if proc.stops != 1 {
+		t.Fatalf("process stops = %d, want 1", proc.stops)
+	}
+	if controller.proc != nil {
+		t.Fatal("controller proc was not cleared after Stop")
+	}
+}
+
+func TestControllerStopNoOpsWhenNotStarted(t *testing.T) {
+	controller := &Controller{}
+
+	if err := controller.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
 	}
 }
 

@@ -1,10 +1,13 @@
 package hath
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/ngnlAYY/hath-with-natter/internal/process"
 )
 
 // Config describes hath-rust process settings and client credentials.
@@ -68,6 +71,58 @@ func (c Config) WriteClientLogin() error {
 	}
 
 	return nil
+}
+
+type Controller struct {
+	Config Config
+	Runner process.Runner
+	proc   process.Process
+}
+
+func (c *Controller) Start(ctx context.Context, port int) error {
+	if err := c.Config.WriteClientLogin(); err != nil {
+		return err
+	}
+	runner := c.runner()
+	proc, err := runner.Start(ctx, process.Spec{
+		Name: "hath-rust",
+		Path: c.Config.BinaryPath,
+		Args: c.Config.Args(port),
+	})
+	if err != nil {
+		return err
+	}
+	c.proc = proc
+	return nil
+}
+
+func (c *Controller) Stop(ctx context.Context) error {
+	if c.proc == nil {
+		return nil
+	}
+	proc := c.proc
+	c.proc = nil
+	return proc.Stop(ctx)
+}
+
+func (c *Controller) Running() bool {
+	if c.proc == nil {
+		return false
+	}
+	select {
+	case <-c.proc.Done():
+		c.proc = nil
+		return false
+	default:
+		return true
+	}
+}
+
+func (c *Controller) runner() process.Runner {
+	if c.Runner != nil {
+		return c.Runner
+	}
+	return process.OSRunner{}
 }
 
 func quietFlagForLogLevel(logLevel string) string {

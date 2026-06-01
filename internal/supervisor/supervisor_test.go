@@ -4,21 +4,28 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ngnlAYY/hath-with-natter/internal/natmap"
 )
 
 type fakeHath struct {
-	running  bool
-	starts   []int
-	stops    int
-	errStart error
-	errStop  error
-	events   *[]string
+	mu              sync.Mutex
+	running         bool
+	starts          []int
+	stops           int
+	stopCalls       int
+	stopHadDeadline bool
+	errStart        error
+	errStop         error
+	events          *[]string
 }
 
 func (f *fakeHath) Start(ctx context.Context, port int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.events != nil {
 		*f.events = append(*f.events, "start")
 	}
@@ -31,6 +38,10 @@ func (f *fakeHath) Start(ctx context.Context, port int) error {
 }
 
 func (f *fakeHath) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopCalls++
+	_, f.stopHadDeadline = ctx.Deadline()
 	if f.events != nil {
 		*f.events = append(*f.events, "stop")
 	}
@@ -45,16 +56,45 @@ func (f *fakeHath) Stop(ctx context.Context) error {
 }
 
 func (f *fakeHath) Running() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.running
 }
 
+func (f *fakeHath) startPorts() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int(nil), f.starts...)
+}
+
+func (f *fakeHath) stopCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stops
+}
+
+func (f *fakeHath) totalStopCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stopCalls
+}
+
+func (f *fakeHath) stoppedWithDeadline() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stopHadDeadline
+}
+
 type fakeUpdater struct {
+	mu        sync.Mutex
 	ports     []int
 	errUpdate error
 	events    *[]string
 }
 
 func (f *fakeUpdater) UpdatePort(ctx context.Context, port int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.events != nil {
 		*f.events = append(*f.events, "update")
 	}
@@ -63,6 +103,204 @@ func (f *fakeUpdater) UpdatePort(ctx context.Context, port int) error {
 	}
 	f.ports = append(f.ports, port)
 	return nil
+}
+
+func (f *fakeUpdater) updatedPorts() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int(nil), f.ports...)
+}
+
+type fakeNatmapProcess struct {
+	mu              sync.Mutex
+	starts          int
+	stops           int
+	stopHadDeadline bool
+	done            chan error
+	err             error
+}
+
+func newFakeNatmapProcess() *fakeNatmapProcess {
+	return &fakeNatmapProcess{done: make(chan error, 1)}
+}
+
+func (f *fakeNatmapProcess) Start(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.starts++
+	return f.err
+}
+
+func (f *fakeNatmapProcess) Stop(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stops++
+	_, f.stopHadDeadline = ctx.Deadline()
+	return nil
+}
+
+func (f *fakeNatmapProcess) Done() <-chan error {
+	return f.done
+}
+
+func (f *fakeNatmapProcess) startCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.starts
+}
+
+func (f *fakeNatmapProcess) stopCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stops
+}
+
+func (f *fakeNatmapProcess) stoppedWithDeadline() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stopHadDeadline
+}
+
+func TestRuntimeRunHandlesMappingThroughCoordinator(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan natmap.Mapping)
+	natmapProc := newFakeNatmapProcess()
+	hath := &fakeHath{}
+	updater := &fakeUpdater{}
+	runtime := Runtime{
+		Natmap:     natmapProc,
+		Hath:       hath,
+		Updater:    updater,
+		Events:     events,
+		RetryDelay: time.Millisecond,
+	}
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runtime.Run(ctx)
+	}()
+
+	waitUntil(t, func() bool { return natmapProc.startCount() == 1 })
+	events <- testMapping("203.0.113.10", 50000, 7000)
+	waitUntil(t, func() bool { return len(updater.updatedPorts()) == 1 && len(hath.startPorts()) == 1 })
+
+	cancel()
+	if err := waitForRun(t, runDone); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	assertInts(t, updater.updatedPorts(), []int{50000})
+	assertInts(t, hath.startPorts(), []int{7000})
+	if natmapProc.stopCount() == 0 {
+		t.Fatal("natmap Stop was not called")
+	}
+	if hath.totalStopCalls() == 0 {
+		t.Fatal("hath Stop was not called")
+	}
+}
+
+func TestRuntimeRunRetriesNatmapStartFailureUntilContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	natmapProc := newFakeNatmapProcess()
+	natmapProc.err = errors.New("start failed")
+	runtime := Runtime{
+		Natmap:     natmapProc,
+		Hath:       &fakeHath{},
+		Updater:    &fakeUpdater{},
+		Events:     make(chan natmap.Mapping),
+		RetryDelay: time.Millisecond,
+	}
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runtime.Run(ctx)
+	}()
+
+	waitUntil(t, func() bool { return natmapProc.startCount() >= 2 })
+	cancel()
+	if err := waitForRun(t, runDone); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestRuntimeRunUsesShutdownTimeoutWhenContextCancels(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	natmapProc := newFakeNatmapProcess()
+	hath := &fakeHath{running: true}
+	runtime := Runtime{
+		Natmap:          natmapProc,
+		Hath:            hath,
+		Updater:         &fakeUpdater{},
+		Events:          make(chan natmap.Mapping),
+		RetryDelay:      time.Millisecond,
+		ShutdownTimeout: time.Second,
+	}
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runtime.Run(ctx)
+	}()
+
+	waitUntil(t, func() bool { return natmapProc.startCount() == 1 })
+	cancel()
+	if err := waitForRun(t, runDone); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !natmapProc.stoppedWithDeadline() {
+		t.Fatal("natmap Stop did not receive a deadline context")
+	}
+	if !hath.stoppedWithDeadline() {
+		t.Fatal("hath Stop did not receive a deadline context")
+	}
+}
+
+func TestRuntimeRunStopsProcessesOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	natmapProc := newFakeNatmapProcess()
+	hath := &fakeHath{running: true}
+	runtime := Runtime{
+		Natmap:     natmapProc,
+		Hath:       hath,
+		Updater:    &fakeUpdater{},
+		Events:     make(chan natmap.Mapping),
+		RetryDelay: time.Millisecond,
+	}
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runtime.Run(ctx)
+	}()
+
+	waitUntil(t, func() bool { return natmapProc.startCount() == 1 })
+	cancel()
+	if err := waitForRun(t, runDone); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if natmapProc.stopCount() == 0 {
+		t.Fatal("natmap Stop was not called")
+	}
+	if hath.totalStopCalls() == 0 {
+		t.Fatal("hath Stop was not called")
+	}
+}
+
+func TestRuntimeRunRejectsNilDependencies(t *testing.T) {
+	tests := []struct {
+		name    string
+		runtime *Runtime
+		want    string
+	}{
+		{name: "nil runtime", runtime: nil, want: "runtime 未初始化"},
+		{name: "nil natmap", runtime: &Runtime{Hath: &fakeHath{}, Updater: &fakeUpdater{}, Events: make(chan natmap.Mapping)}, want: "natmap 进程未配置"},
+		{name: "nil hath", runtime: &Runtime{Natmap: newFakeNatmapProcess(), Updater: &fakeUpdater{}, Events: make(chan natmap.Mapping)}, want: "hath 控制器未配置"},
+		{name: "nil updater", runtime: &Runtime{Natmap: newFakeNatmapProcess(), Hath: &fakeHath{}, Events: make(chan natmap.Mapping)}, want: "端口更新器未配置"},
+		{name: "nil events", runtime: &Runtime{Natmap: newFakeNatmapProcess(), Hath: &fakeHath{}, Updater: &fakeUpdater{}}, want: "natmap 事件通道未配置"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.runtime.Run(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Run error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
 }
 
 func TestHandleMappingNilCoordinatorReturnsErrorWithoutPanic(t *testing.T) {
@@ -94,10 +332,10 @@ func TestHandleMappingFirstMappingUpdatesPublicPortAndStartsWithPrivatePort(t *t
 		t.Fatalf("HandleMapping returned error: %v", err)
 	}
 
-	assertInts(t, updater.ports, []int{50000})
-	assertInts(t, hath.starts, []int{7000})
-	if hath.stops != 0 {
-		t.Fatalf("expected no stops, got %d", hath.stops)
+	assertInts(t, updater.updatedPorts(), []int{50000})
+	assertInts(t, hath.startPorts(), []int{7000})
+	if hath.stopCount() != 0 {
+		t.Fatalf("expected no stops, got %d", hath.stopCount())
 	}
 	if !coordinator.CurrentMapping.SamePublicEndpoint(mapping) {
 		t.Fatalf("expected current mapping to be updated")
@@ -115,10 +353,10 @@ func TestHandleMappingSameMappingWhileRunningDoesNothing(t *testing.T) {
 		t.Fatalf("HandleMapping returned error: %v", err)
 	}
 
-	assertInts(t, updater.ports, nil)
-	assertInts(t, hath.starts, nil)
-	if hath.stops != 0 {
-		t.Fatalf("expected no stops, got %d", hath.stops)
+	assertInts(t, updater.updatedPorts(), nil)
+	assertInts(t, hath.startPorts(), nil)
+	if hath.stopCount() != 0 {
+		t.Fatalf("expected no stops, got %d", hath.stopCount())
 	}
 }
 
@@ -136,11 +374,11 @@ func TestHandleMappingChangedMappingStopsUpdatesThenStarts(t *testing.T) {
 	}
 
 	assertStrings(t, events, []string{"stop", "update", "start"})
-	if hath.stops != 1 {
-		t.Fatalf("expected one stop, got %d", hath.stops)
+	if hath.stopCount() != 1 {
+		t.Fatalf("expected one stop, got %d", hath.stopCount())
 	}
-	assertInts(t, updater.ports, []int{51000})
-	assertInts(t, hath.starts, []int{7100})
+	assertInts(t, updater.updatedPorts(), []int{51000})
+	assertInts(t, hath.startPorts(), []int{7100})
 	if !coordinator.CurrentMapping.SamePublicEndpoint(newMapping) {
 		t.Fatalf("expected current mapping to be updated")
 	}
@@ -157,10 +395,10 @@ func TestHandleMappingSameMappingWhileStoppedStartsWithoutUpdate(t *testing.T) {
 		t.Fatalf("HandleMapping returned error: %v", err)
 	}
 
-	assertInts(t, updater.ports, nil)
-	assertInts(t, hath.starts, []int{7000})
-	if hath.stops != 0 {
-		t.Fatalf("expected no stops, got %d", hath.stops)
+	assertInts(t, updater.updatedPorts(), nil)
+	assertInts(t, hath.startPorts(), []int{7000})
+	if hath.stopCount() != 0 {
+		t.Fatalf("expected no stops, got %d", hath.stopCount())
 	}
 }
 
@@ -176,8 +414,8 @@ func TestHandleMappingStopFailureReturnsContextErrorAndStopsWorkflow(t *testing.
 	err := coordinator.HandleMapping(ctx, newMapping)
 
 	assertWrappedError(t, err, stopErr, "停止 hath-rust 失败")
-	assertInts(t, updater.ports, nil)
-	assertInts(t, hath.starts, nil)
+	assertInts(t, updater.updatedPorts(), nil)
+	assertInts(t, hath.startPorts(), nil)
 	if !coordinator.CurrentMapping.SamePublicEndpoint(oldMapping) {
 		t.Fatalf("expected current mapping to remain unchanged")
 	}
@@ -195,7 +433,7 @@ func TestHandleMappingUpdateFailureReturnsContextErrorAndStopsWorkflow(t *testin
 	err := coordinator.HandleMapping(ctx, newMapping)
 
 	assertWrappedError(t, err, updateErr, "更新 H@H 公网端口失败")
-	assertInts(t, hath.starts, nil)
+	assertInts(t, hath.startPorts(), nil)
 	if !coordinator.CurrentMapping.SamePublicEndpoint(oldMapping) {
 		t.Fatalf("expected current mapping to remain unchanged")
 	}
@@ -213,7 +451,7 @@ func TestHandleMappingStartFailureReturnsContextError(t *testing.T) {
 	err := coordinator.HandleMapping(ctx, newMapping)
 
 	assertWrappedError(t, err, startErr, "启动 hath-rust 失败")
-	assertInts(t, updater.ports, []int{51000})
+	assertInts(t, updater.updatedPorts(), []int{51000})
 	if !coordinator.CurrentMapping.SamePublicEndpoint(oldMapping) {
 		t.Fatalf("expected current mapping to remain unchanged")
 	}
@@ -269,6 +507,34 @@ func assertStrings(t *testing.T, got []string, want []string) {
 		if got[i] != want[i] {
 			t.Fatalf("got %v, want %v", got, want)
 		}
+	}
+}
+
+func waitUntil(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		if condition() {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for condition")
+		case <-tick.C:
+		}
+	}
+}
+
+func waitForRun(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Run to exit")
+		return nil
 	}
 }
 
