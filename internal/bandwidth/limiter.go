@@ -14,6 +14,8 @@ type CommandRunner interface {
 	Run(ctx context.Context, name string, args ...string) error
 }
 
+const capNETAdmin = 12
+
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
@@ -31,8 +33,12 @@ func CheckNETAdmin() error {
 	if err != nil {
 		return fmt.Errorf("读取进程 capability 失败: %w", err)
 	}
+	return checkNETAdminStatus(status)
+}
+
+func checkNETAdminStatus(status []byte) error {
 	for _, line := range strings.Split(string(status), "\n") {
-		if strings.HasPrefix(line, "CapEff:") {
+		if strings.HasPrefix(line, "CapBnd:") {
 			fields := strings.Fields(line)
 			if len(fields) != 2 {
 				return fmt.Errorf("解析进程 capability 失败")
@@ -41,13 +47,13 @@ func CheckNETAdmin() error {
 			if err != nil {
 				return fmt.Errorf("解析进程 capability 失败: %w", err)
 			}
-			if capabilityMask&(1<<12) == 0 {
-				return fmt.Errorf("缺少 NET_ADMIN capability，无法配置 tc 上传限速")
+			if capabilityMask&(1<<capNETAdmin) == 0 {
+				return fmt.Errorf("缺少 NET_ADMIN capability bounding set，无法配置 tc 上传限速")
 			}
 			return nil
 		}
 	}
-	return fmt.Errorf("进程 capability 信息缺少 CapEff")
+	return fmt.Errorf("进程 capability 信息缺少 CapBnd")
 }
 
 type Limiter struct {

@@ -3,6 +3,7 @@ package bandwidth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -58,6 +59,46 @@ func TestExecRunnerErrorDoesNotIncludeCommandOutput(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "输出") {
 		t.Fatalf("Run() error included command output context: %v", err)
+	}
+}
+
+func TestCheckNETAdminStatusUsesBoundingSet(t *testing.T) {
+	status := []byte(fmt.Sprintf("CapEff:\t%016x\nCapBnd:\t%016x\n", uint64(0), uint64(1<<capNETAdmin)))
+	if err := checkNETAdminStatus(status); err != nil {
+		t.Fatalf("checkNETAdminStatus() error = %v", err)
+	}
+}
+
+func TestCheckNETAdminStatusRejectsMissingNETAdminInBoundingSet(t *testing.T) {
+	status := []byte(fmt.Sprintf("CapEff:\t%016x\nCapBnd:\t%016x\n", uint64(1<<capNETAdmin), uint64(0)))
+	err := checkNETAdminStatus(status)
+	if err == nil {
+		t.Fatal("checkNETAdminStatus() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "缺少 NET_ADMIN capability bounding set") {
+		t.Fatalf("checkNETAdminStatus() error = %q, want missing NET_ADMIN bounding set", err.Error())
+	}
+}
+
+func TestCheckNETAdminStatusRejectsInvalidBoundingSet(t *testing.T) {
+	status := []byte("CapBnd:\tnot-hex\n")
+	err := checkNETAdminStatus(status)
+	if err == nil {
+		t.Fatal("checkNETAdminStatus() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "解析进程 capability 失败") {
+		t.Fatalf("checkNETAdminStatus() error = %q, want parse failure", err.Error())
+	}
+}
+
+func TestCheckNETAdminStatusRejectsMissingBoundingSet(t *testing.T) {
+	status := []byte("CapEff:\t0000000000001000\n")
+	err := checkNETAdminStatus(status)
+	if err == nil {
+		t.Fatal("checkNETAdminStatus() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "CapBnd") {
+		t.Fatalf("checkNETAdminStatus() error = %q, want missing CapBnd", err.Error())
 	}
 }
 
