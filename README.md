@@ -25,7 +25,7 @@ cp configs/config.example.yaml config.yaml
 构建镜像：
 
 ```bash
-docker build -t hath-with-natmap:local .
+docker build -f docker/Dockerfile -t hath-with-natmap:local .
 ```
 
 运行容器：

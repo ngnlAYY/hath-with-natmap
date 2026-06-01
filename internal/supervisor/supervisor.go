@@ -30,6 +30,7 @@ type Runtime struct {
 	Hath            HathController
 	Updater         PortUpdater
 	Events          <-chan natmap.Mapping
+	BindPort        int
 	RetryDelay      time.Duration
 	RestartDelay    time.Duration
 	ShutdownTimeout time.Duration
@@ -39,6 +40,7 @@ type Coordinator struct {
 	Hath           HathController
 	Updater        PortUpdater
 	CurrentMapping natmap.Mapping
+	BindPort       int
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
@@ -46,7 +48,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 		return err
 	}
 
-	coordinator := &Coordinator{Hath: r.Hath, Updater: r.Updater}
+	coordinator := &Coordinator{Hath: r.Hath, Updater: r.Updater, BindPort: r.BindPort}
 	for {
 		if ctx.Err() != nil {
 			r.stopAllWithTimeout()
@@ -93,6 +95,9 @@ func (r *Runtime) validate() error {
 	}
 	if r.Events == nil {
 		return fmt.Errorf("natmap 事件通道未配置")
+	}
+	if r.BindPort <= 0 || r.BindPort > 65535 {
+		return fmt.Errorf("本地固定端口未配置")
 	}
 	return nil
 }
@@ -188,6 +193,12 @@ func (c *Coordinator) HandleMapping(ctx context.Context, mapping natmap.Mapping)
 	if c.Updater == nil {
 		return fmt.Errorf("端口更新器未配置")
 	}
+	if c.BindPort <= 0 || c.BindPort > 65535 {
+		return fmt.Errorf("本地固定端口未配置")
+	}
+	if mapping.PrivatePort != c.BindPort {
+		return fmt.Errorf("natmap 本地端口 %d 与配置固定端口 %d 不一致", mapping.PrivatePort, c.BindPort)
+	}
 
 	if c.CurrentMapping.SamePublicEndpoint(mapping) {
 		if c.Hath.Running() {
@@ -195,8 +206,8 @@ func (c *Coordinator) HandleMapping(ctx context.Context, mapping natmap.Mapping)
 			return nil
 		}
 
-		log.Printf("映射未变化但 hath-rust 未运行，使用本地端口 %d 启动", mapping.PrivatePort)
-		if err := c.Hath.Start(ctx, mapping.PrivatePort); err != nil {
+		log.Printf("映射未变化但 hath-rust 未运行，使用本地端口 %d 启动", c.BindPort)
+		if err := c.Hath.Start(ctx, c.BindPort); err != nil {
 			return fmt.Errorf("启动 hath-rust 失败: %w", err)
 		}
 		return nil
@@ -214,8 +225,8 @@ func (c *Coordinator) HandleMapping(ctx context.Context, mapping natmap.Mapping)
 		return fmt.Errorf("更新 H@H 公网端口失败: %w", err)
 	}
 
-	log.Printf("使用本地端口 %d 启动 hath-rust", mapping.PrivatePort)
-	if err := c.Hath.Start(ctx, mapping.PrivatePort); err != nil {
+	log.Printf("使用本地端口 %d 启动 hath-rust", c.BindPort)
+	if err := c.Hath.Start(ctx, c.BindPort); err != nil {
 		return fmt.Errorf("启动 hath-rust 失败: %w", err)
 	}
 

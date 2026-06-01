@@ -123,6 +123,7 @@ func run(ctx context.Context, args []string) error {
 		Hath:            hathController,
 		Updater:         updater,
 		Events:          events,
+		BindPort:        cfg.Network.BindPort,
 		RetryDelay:      cfg.Runtime.Retry.InitialDelay.Duration,
 		RestartDelay:    cfg.Runtime.RestartDelay.Duration,
 		ShutdownTimeout: cfg.Runtime.ShutdownTimeout.Duration,

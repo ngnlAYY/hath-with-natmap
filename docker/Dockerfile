@@ -14,7 +14,7 @@ ARG NATMAP_VERSION=20260214
 ARG HATH_RUST_VERSION=v1.17.0
 
 RUN apk add --no-cache ca-certificates wget
-COPY packaging/checksums.txt /checksums.txt
+COPY docker/checksums.txt /checksums.txt
 RUN set -eux; \
     case "${TARGETARCH}/${TARGETVARIANT}" in \
       "amd64/") \

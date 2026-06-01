@@ -68,4 +68,4 @@
 permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
 ```
 
-说明当前用户没有访问 Docker daemon 的权限。请在宿主机上修复 Docker 权限，或使用有权限的 CI/构建环境。
+说明当前用户没有访问 Docker daemon 的权限。请在宿主机上修复 Docker 权限，或使用有权限的 CI/构建环境。当前项目的 Dockerfile 位于 `docker/Dockerfile`，本地构建时需要使用 `docker build -f docker/Dockerfile ...`。

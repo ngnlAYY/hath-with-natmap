@@ -7,16 +7,16 @@
 本地构建当前架构镜像：
 
 ```bash
-docker build -t hath-with-natmap:local .
+docker build -f docker/Dockerfile -t hath-with-natmap:local .
 ```
 
 构建指定平台：
 
 ```bash
-docker build --platform linux/amd64 -t hath-with-natmap:local .
+docker build -f docker/Dockerfile --platform linux/amd64 -t hath-with-natmap:local .
 ```
 
-Dockerfile 会在构建期下载固定版本的 `natmap` 与 `hath-rust` release 二进制，并用 `packaging/checksums.txt` 校验 SHA256。
+`docker/Dockerfile` 会在构建期下载固定版本的 `natmap` 与 `hath-rust` release 二进制，并用 `docker/checksums.txt` 校验 SHA256。
 
 ## 运行
 
