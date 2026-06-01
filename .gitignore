@@ -7,3 +7,8 @@
 
 # 本地构建产物。
 /hath-natmap
+
+# 文档
+docs/superpowers
+
+.gitignore

@@ -34,6 +34,8 @@ docker build -f docker/Dockerfile -t hath:natmap-rust .
 docker run --rm \
   --name natmap-rust \
   --net host \
+  -e PUID="$(id -u)" \
+  -e PGID="$(id -g)" \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
   hath:natmap-rust

@@ -31,3 +31,6 @@ services:
     environment:
       # 容器时区；可按需要改为其它 IANA 时区名称。
       TZ: Asia/Shanghai
+      # 可选：设置为宿主机 hath 数据目录所有者的 UID/GID。
+      PUID: "1000"
+      PGID: "1000"

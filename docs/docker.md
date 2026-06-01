@@ -24,6 +24,8 @@ docker build -f docker/Dockerfile --platform linux/amd64 -t hath:natmap-rust .
 docker run --rm \
   --name natmap-rust \
   --net host \
+  -e PUID="$(id -u)" \
+  -e PGID="$(id -g)" \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
   hath:natmap-rust
@@ -46,6 +48,8 @@ docker run --rm \
   --name natmap-rust \
   --net host \
   --cap-add NET_ADMIN \
+  -e PUID="$(id -u)" \
+  -e PGID="$(id -g)" \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
   hath:natmap-rust
@@ -58,7 +62,21 @@ docker run --rm \
 - `/config/config.yaml`：只读挂载配置文件。
 - `/data/hath`：持久化 `hath-rust` 数据。
 
-镜像默认以非 root 用户 `hath` 运行。若挂载宿主机目录到 `/data/hath`，请确保容器内用户可以写入该目录。
+镜像默认以非 root 用户 `hath` 运行。若挂载宿主机目录到 `/data/hath`，推荐通过 `PUID` 和 `PGID` 指定容器内 `hath` 用户的运行 UID/GID，使其匹配宿主机数据目录所有者：
+
+```yaml
+environment:
+  PUID: "1000"
+  PGID: "1000"
+```
+
+也可以直接使用当前宿主机用户：
+
+```bash
+-e PUID="$(id -u)" -e PGID="$(id -g)"
+```
+
+未设置 `PUID`/`PGID` 时，镜像使用内置的 `hath` 用户和组。`PUID`/`PGID` 必须是非 0 数字。容器启动时会检查 `/data/hath` 和 `/run/hath-natmap` 的属主；只有属主不匹配时才会在当前文件系统内修正权限，且不会跟随符号链接。
 
 ## 支持平台
 

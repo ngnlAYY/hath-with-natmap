@@ -47,7 +47,7 @@ RUN set -eux; \
 
 FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 
-RUN apk add --no-cache ca-certificates iproute2 tzdata \
+RUN apk add --no-cache ca-certificates iproute2 shadow su-exec tzdata \
     && apk add --no-cache --virtual .cap-tools libcap \
     && addgroup -S hath \
     && adduser -S -D -H -G hath -h /app -s /sbin/nologin hath \
@@ -58,9 +58,10 @@ COPY --from=go-builder /out/hath-natmap /usr/local/bin/hath-natmap
 COPY --from=binary-downloader /out-natmap /usr/local/bin/natmap
 COPY --from=binary-downloader /out-hath-rust /usr/local/bin/hath-rust
 COPY scripts/natmap-notify.sh /usr/local/bin/natmap-notify.sh
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY configs/config.example.yaml /config/config.example.yaml
 
-RUN chmod 0755 /usr/local/bin/hath-natmap /usr/local/bin/natmap /usr/local/bin/hath-rust /usr/local/bin/natmap-notify.sh \
+RUN chmod 0755 /usr/local/bin/hath-natmap /usr/local/bin/natmap /usr/local/bin/hath-rust /usr/local/bin/natmap-notify.sh /usr/local/bin/entrypoint.sh \
     && setcap cap_net_admin+ep "$(command -v tc)" \
     && setcap -v cap_net_admin+ep "$(command -v tc)" \
     && cp /config/config.example.yaml /config/config.yaml \
@@ -70,7 +71,5 @@ RUN chmod 0755 /usr/local/bin/hath-natmap /usr/local/bin/natmap /usr/local/bin/h
     && chmod 0644 /config/config.example.yaml /config/config.yaml \
     && apk del .cap-tools
 
-USER hath
-
-ENTRYPOINT ["/usr/local/bin/hath-natmap"]
-CMD ["--config", "/config/config.yaml"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/usr/local/bin/hath-natmap", "--config", "/config/config.yaml"]
