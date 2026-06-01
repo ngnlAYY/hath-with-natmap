@@ -7,13 +7,13 @@
 本地构建当前架构镜像：
 
 ```bash
-docker build -f docker/Dockerfile -t hath-with-natmap:local .
+docker build -f docker/Dockerfile -t hath:natmap-rust .
 ```
 
 构建指定平台：
 
 ```bash
-docker build -f docker/Dockerfile --platform linux/amd64 -t hath-with-natmap:local .
+docker build -f docker/Dockerfile --platform linux/amd64 -t hath:natmap-rust .
 ```
 
 `docker/Dockerfile` 会在构建期下载固定版本的 `natmap` 与 `hath-rust` release 二进制，并用 `docker/checksums.txt` 校验 SHA256。
@@ -22,29 +22,33 @@ docker build -f docker/Dockerfile --platform linux/amd64 -t hath-with-natmap:loc
 
 ```bash
 docker run --rm \
-  --name hath-with-natmap \
+  --name natmap-rust \
   --net host \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
-  hath-with-natmap:local
+  hath:natmap-rust
 ```
 
 也可以使用 Docker Compose 示例：
 
 ```bash
-docker compose -f docker/docker-compose.yaml up -d --build
+# 使用已有的 hath:natmap-rust 镜像
+docker compose -f docker/docker-compose.yaml up -d
+
+# 或从本地源码构建镜像后运行
+docker compose -f docker/docker-compose.build.yaml up -d --build
 ```
 
 如果启用了 `bandwidth.enabled`，添加 `NET_ADMIN` capability：
 
 ```bash
 docker run --rm \
-  --name hath-with-natmap \
+  --name natmap-rust \
   --net host \
   --cap-add NET_ADMIN \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
-  hath-with-natmap:local
+  hath:natmap-rust
 ```
 
 ## 权限

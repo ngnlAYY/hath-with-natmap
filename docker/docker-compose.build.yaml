@@ -1,16 +1,19 @@
-# Docker Compose 示例：直接使用已经构建好的 hath:natmap-rust 镜像。
+# Docker Compose 示例：从本地源码构建 hath:natmap-rust 镜像并运行。
 #
 # 使用方式（在仓库根目录执行）：
 #   cp configs/config.example.yaml config.yaml
-#   docker compose -f docker/docker-compose.yaml up -d
+#   docker compose -f docker/docker-compose.build.yaml up -d --build
 #
-# 本项目推荐使用 host network，因为 natmap 和 hath-rust 需要共享固定本地端口。
+# 如果已经有构建好的 hath:natmap-rust 镜像，请使用 docker/docker-compose.yaml。
 
 name: natmap-rust
 
 services:
   natmap-rust:
     image: hath:natmap-rust
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: natmap-rust
     network_mode: host
     restart: unless-stopped

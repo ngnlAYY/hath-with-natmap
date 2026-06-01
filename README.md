@@ -25,18 +25,18 @@ cp configs/config.example.yaml config.yaml
 构建镜像：
 
 ```bash
-docker build -f docker/Dockerfile -t hath-with-natmap:local .
+docker build -f docker/Dockerfile -t hath:natmap-rust .
 ```
 
 运行容器：
 
 ```bash
 docker run --rm \
-  --name hath-with-natmap \
+  --name natmap-rust \
   --net host \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
-  hath-with-natmap:local
+  hath:natmap-rust
 ```
 
 如果启用了 `bandwidth.enabled`，需要额外添加：
@@ -48,7 +48,11 @@ docker run --rm \
 也可以使用 Docker Compose 示例：
 
 ```bash
-docker compose -f docker/docker-compose.yaml up -d --build
+# 使用已有的 hath:natmap-rust 镜像
+docker compose -f docker/docker-compose.yaml up -d
+
+# 或从本地源码构建镜像后运行
+docker compose -f docker/docker-compose.build.yaml up -d --build
 ```
 
 ## 文档
