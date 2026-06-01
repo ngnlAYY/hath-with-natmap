@@ -221,6 +221,37 @@ func TestRuntimeRunRetriesNatmapStartFailureUntilContextCancel(t *testing.T) {
 	}
 }
 
+func TestRuntimeRunUsesRestartDelayAfterNatmapExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	natmapProc := newFakeNatmapProcess()
+	runtime := Runtime{
+		Natmap:       natmapProc,
+		Hath:         &fakeHath{},
+		Updater:      &fakeUpdater{},
+		Events:       make(chan natmap.Mapping),
+		RetryDelay:   time.Millisecond,
+		RestartDelay: 50 * time.Millisecond,
+	}
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runtime.Run(ctx)
+	}()
+
+	waitUntil(t, func() bool { return natmapProc.startCount() == 1 })
+	natmapProc.done <- errors.New("natmap exited")
+	time.Sleep(10 * time.Millisecond)
+	if natmapProc.startCount() != 1 {
+		t.Fatalf("natmap restarted before RestartDelay elapsed; starts = %d", natmapProc.startCount())
+	}
+	waitUntil(t, func() bool { return natmapProc.startCount() >= 2 })
+
+	cancel()
+	if err := waitForRun(t, runDone); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
 func TestRuntimeRunUsesShutdownTimeoutWhenContextCancels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	natmapProc := newFakeNatmapProcess()

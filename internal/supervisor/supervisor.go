@@ -71,7 +71,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 			return nil
 		}
 		r.stopAll(ctx)
-		if !sleep(ctx, r.retryDelay()) {
+		if !sleep(ctx, r.restartDelay()) {
 			r.stopAllWithTimeout()
 			return nil
 		}
@@ -153,6 +153,13 @@ func (r *Runtime) retryDelay() time.Duration {
 		return r.RetryDelay
 	}
 	return 5 * time.Second
+}
+
+func (r *Runtime) restartDelay() time.Duration {
+	if r.RestartDelay > 0 {
+		return r.RestartDelay
+	}
+	return r.retryDelay()
 }
 
 func sleep(ctx context.Context, delay time.Duration) bool {
