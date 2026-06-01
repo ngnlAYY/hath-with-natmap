@@ -49,7 +49,21 @@
 - `network.bind_port` 不在 1 到 65535 范围内。
 - `proxy.enabled` 为 `true` 但 `proxy.url` 为空或协议不受支持。
 - `bandwidth.enabled` 为 `true` 但 `upload_limit` 或 `interface` 格式不合法。
+- `natmap.address_family` 不是 `ipv4` 或 `ipv6`。
+- `natmap.interface` 不是合法网卡名或 IP，或包含空白、shell 元字符等不安全字符。
+- `natmap.fwmark` 不是十进制、八进制或 `0x` 十六进制无符号整数。
+- `natmap.udp_check_cycle` 小于 `0`。
+- `hath.max_connection` 小于 `0`。
 - 配置中的外部路径不可执行或目录不可写。
+
+## 上游参数未生效或不支持
+
+检查：
+
+- 该参数是否在 `docs/configuration.md` 记录的白名单内；本项目不支持 raw `extra_args`，不能用任意参数透传绕过白名单。
+- 当前镜像内的 upstream 版本是否支持该参数；默认镜像固定使用 `natmap` 20260214 与 `hath-rust` v1.17.0。
+- 参数是否因默认值未触发传递：例如 `natmap.udp_check_cycle: 0` 和 `hath.max_connection: 0` 都表示不向子进程传递对应参数。
+- 参数是否属于编排器保留控制范围，例如固定端口、notify、hath 目录、proxy 来源和进程生命周期不能由白名单字段覆盖。
 
 ## 代理无法连接
 

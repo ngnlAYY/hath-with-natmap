@@ -16,6 +16,11 @@ natmap:
   http_keepalive_server: www.baidu.com:80
   keepalive_interval: 15s
   notify_script: /usr/local/bin/natmap-notify.sh
+  address_family: ipv4
+  udp_mode: false
+  interface: ""
+  fwmark: ""
+  udp_check_cycle: 0
 
 hath:
   binary_path: /usr/local/bin/hath-rust
@@ -23,6 +28,14 @@ hath:
   log_level: info
   force_background_scan: true
   rpc_server_ip: ""
+  disable_logging: false
+  flush_log: false
+  max_connection: 0
+  disable_ip_origin_check: false
+  disable_flood_control: false
+  enable_metrics: false
+  disable_server_header: false
+  enable_h3: false
 
 proxy:
   enabled: true
