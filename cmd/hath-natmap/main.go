@@ -75,34 +75,7 @@ func run(ctx context.Context, args []string) error {
 		}
 	}()
 
-	runner := process.OSRunner{}
-	natmapRunner := &natmap.ProcessRunner{
-		Config: natmap.RunnerConfig{
-			BinaryPath:          cfg.Natmap.BinaryPath,
-			BindPort:            cfg.Network.BindPort,
-			StunServer:          cfg.Natmap.StunServer,
-			HTTPKeepaliveServer: cfg.Natmap.HTTPKeepaliveServer,
-			KeepaliveInterval:   cfg.Natmap.KeepaliveInterval.Duration,
-			NotifyScript:        cfg.Natmap.NotifyScript,
-			NotifyToken:         notifyToken,
-		},
-		Runner:   runner,
-		Listener: listener,
-	}
-	hathController := &hath.Controller{
-		Config: hath.Config{
-			BinaryPath:          cfg.Hath.BinaryPath,
-			DataDir:             cfg.Hath.DataDir,
-			LogLevel:            cfg.Hath.LogLevel,
-			ForceBackgroundScan: cfg.Hath.ForceBackgroundScan,
-			RPCServerIP:         cfg.Hath.RPCServerIP,
-			ProxyURL:            cfg.Proxy.URL,
-			UseProxy:            cfg.Proxy.UseForHathDownloads,
-			ClientID:            cfg.EHentai.ClientID,
-			ClientKey:           cfg.EHentai.ClientKey,
-		},
-		Runner: runner,
-	}
+	runtime := buildRuntime(cfg, listener, events, notifyToken)
 
 	updaterHTTPClient := http.DefaultClient
 	if cfg.Proxy.Enabled {
@@ -118,20 +91,65 @@ func run(ctx context.Context, args []string) error {
 		PassHash:   cfg.EHentai.PassHash,
 		ClientID:   cfg.EHentai.ClientID,
 	}
-	runtime := supervisor.Runtime{
+	runtime.Updater = updater
+	if err := runtime.Run(ctx); err != nil {
+		return fmt.Errorf("运行失败: %w", err)
+	}
+	return nil
+}
+
+func buildRuntime(cfg config.Config, listener *natmap.Listener, events <-chan natmap.Mapping, notifyToken string) supervisor.Runtime {
+	runner := process.OSRunner{}
+	natmapRunner := &natmap.ProcessRunner{
+		Config: natmap.RunnerConfig{
+			BinaryPath:          cfg.Natmap.BinaryPath,
+			BindPort:            cfg.Network.BindPort,
+			StunServer:          cfg.Natmap.StunServer,
+			HTTPKeepaliveServer: cfg.Natmap.HTTPKeepaliveServer,
+			KeepaliveInterval:   cfg.Natmap.KeepaliveInterval.Duration,
+			NotifyScript:        cfg.Natmap.NotifyScript,
+			NotifyToken:         notifyToken,
+			AddressFamily:       cfg.Natmap.AddressFamily,
+			UDPMode:             cfg.Natmap.UDPMode,
+			Interface:           cfg.Natmap.Interface,
+			FWMark:              cfg.Natmap.FWMark,
+			UDPCheckCycle:       cfg.Natmap.UDPCheckCycle,
+		},
+		Runner:   runner,
+		Listener: listener,
+	}
+	hathController := &hath.Controller{
+		Config: hath.Config{
+			BinaryPath:           cfg.Hath.BinaryPath,
+			DataDir:              cfg.Hath.DataDir,
+			LogLevel:             cfg.Hath.LogLevel,
+			ForceBackgroundScan:  cfg.Hath.ForceBackgroundScan,
+			RPCServerIP:          cfg.Hath.RPCServerIP,
+			ProxyURL:             cfg.Proxy.URL,
+			UseProxy:             cfg.Proxy.UseForHathDownloads,
+			ClientID:             cfg.EHentai.ClientID,
+			ClientKey:            cfg.EHentai.ClientKey,
+			DisableLogging:       cfg.Hath.DisableLogging,
+			FlushLog:             cfg.Hath.FlushLog,
+			MaxConnection:        cfg.Hath.MaxConnection,
+			DisableIPOriginCheck: cfg.Hath.DisableIPOriginCheck,
+			DisableFloodControl:  cfg.Hath.DisableFloodControl,
+			EnableMetrics:        cfg.Hath.EnableMetrics,
+			DisableServerHeader:  cfg.Hath.DisableServerHeader,
+			EnableH3:             cfg.Hath.EnableH3,
+		},
+		Runner: runner,
+	}
+
+	return supervisor.Runtime{
 		Natmap:          natmapRunner,
 		Hath:            hathController,
-		Updater:         updater,
 		Events:          events,
 		BindPort:        cfg.Network.BindPort,
 		RetryDelay:      cfg.Runtime.Retry.InitialDelay.Duration,
 		RestartDelay:    cfg.Runtime.RestartDelay.Duration,
 		ShutdownTimeout: cfg.Runtime.ShutdownTimeout.Duration,
 	}
-	if err := runtime.Run(ctx); err != nil {
-		return fmt.Errorf("运行失败: %w", err)
-	}
-	return nil
 }
 
 func applyBandwidthLimit(ctx context.Context, cfg config.Config, limiter bandwidth.Limiter, checkNETAdmin func() error) (func(), error) {
