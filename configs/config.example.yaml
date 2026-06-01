@@ -1,0 +1,56 @@
+# e-hentai 账号 Cookie 与 Hentai@Home 客户端信息。
+ehentai:
+  member_id: "123456"
+  pass_hash: "example-pass-hash"
+  client_id: "12345"
+  client_key: "example-client-key"
+
+# natmap 和 hath-rust 共享这个固定本地端口。
+network:
+  bind_port: 4567
+  external_update_timeout: 60s
+
+natmap:
+  binary_path: /usr/local/bin/natmap
+  stun_server: stun.nextcloud.com:3478
+  http_keepalive_server: www.baidu.com:80
+  keepalive_interval: 15s
+  notify_script: /usr/local/bin/natmap-notify.sh
+  address_family: ipv4
+  udp_mode: false
+  interface: ""
+  fwmark: ""
+  udp_check_cycle: 0
+
+hath:
+  binary_path: /usr/local/bin/hath-rust
+  data_dir: /data/hath
+  log_level: info
+  force_background_scan: true
+  rpc_server_ip: ""
+  disable_logging: false
+  flush_log: false
+  max_connection: 0
+  disable_ip_origin_check: false
+  disable_flood_control: false
+  enable_metrics: false
+  disable_server_header: false
+  enable_h3: false
+
+proxy:
+  enabled: true
+  url: http://127.0.0.1:8080
+  use_for_hath_downloads: false
+
+# 需要限制上传带宽时再启用；容器运行参数必须授予 NET_ADMIN capability。
+bandwidth:
+  enabled: false
+  upload_limit: 10mbit
+  interface: eth0
+
+runtime:
+  shutdown_timeout: 30s
+  restart_delay: 5s
+  retry:
+    initial_delay: 5s
+    max_delay: 5m
