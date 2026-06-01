@@ -15,6 +15,7 @@ type RunnerConfig struct {
 	HTTPKeepaliveServer string
 	KeepaliveInterval   time.Duration
 	NotifyScript        string
+	NotifyToken         string
 }
 
 func (c RunnerConfig) Args() []string {
@@ -40,6 +41,7 @@ func (r *ProcessRunner) Start(ctx context.Context) error {
 		Name: "natmap",
 		Path: r.Config.BinaryPath,
 		Args: r.Config.Args(),
+		Env:  r.Config.env(),
 	})
 	if err != nil {
 		return err
@@ -64,6 +66,13 @@ func (r *ProcessRunner) Done() <-chan error {
 		return ch
 	}
 	return r.proc.Done()
+}
+
+func (c RunnerConfig) env() []string {
+	if c.NotifyToken == "" {
+		return nil
+	}
+	return []string{NotifyTokenEnv + "=" + c.NotifyToken}
 }
 
 func (r *ProcessRunner) runner() process.Runner {

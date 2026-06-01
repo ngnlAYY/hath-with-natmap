@@ -2,6 +2,8 @@ package natmap
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,14 +14,21 @@ import (
 )
 
 const DefaultNotifySocket = "/run/hath-natmap/notify.sock"
+const NotifyTokenEnv = "HATH_NATMAP_NOTIFY_TOKEN"
 
 type Listener struct {
 	listener  net.Listener
 	done      chan struct{}
+	token     string
 	closeOnce sync.Once
 	closeErr  error
 	connsMu   sync.Mutex
 	conns     map[net.Conn]struct{}
+}
+
+type notifyEnvelope struct {
+	Token   string  `json:"token"`
+	Mapping Mapping `json:"mapping"`
 }
 
 func (l *Listener) Close() error {
@@ -35,7 +44,19 @@ func (l *Listener) Close() error {
 	return l.closeErr
 }
 
+func GenerateNotifyToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("生成 natmap notify token 失败: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
 func ListenNotify(socketPath string) (*Listener, <-chan Mapping, error) {
+	return ListenNotifyWithToken(socketPath, os.Getenv(NotifyTokenEnv))
+}
+
+func ListenNotifyWithToken(socketPath string, token string) (*Listener, <-chan Mapping, error) {
 	if err := removeExistingNotifySocket(socketPath); err != nil {
 		return nil, nil, err
 	}
@@ -53,6 +74,7 @@ func ListenNotify(socketPath string) (*Listener, <-chan Mapping, error) {
 	notifyListener := &Listener{
 		listener: listener,
 		done:     make(chan struct{}),
+		token:    token,
 		conns:    make(map[net.Conn]struct{}),
 	}
 	go acceptNotifyLoop(notifyListener, events)
@@ -89,7 +111,15 @@ func SendNotify(socketPath string, args []string) error {
 	}
 	defer conn.Close()
 
-	if err := json.NewEncoder(conn).Encode(mapping); err != nil {
+	encoder := json.NewEncoder(conn)
+	if token := os.Getenv(NotifyTokenEnv); token != "" {
+		if err := encoder.Encode(notifyEnvelope{Token: token, Mapping: mapping}); err != nil {
+			return fmt.Errorf("发送 natmap notify 事件失败: %w", err)
+		}
+		return nil
+	}
+
+	if err := encoder.Encode(mapping); err != nil {
 		return fmt.Errorf("发送 natmap notify 事件失败: %w", err)
 	}
 	return nil
@@ -115,7 +145,7 @@ func acceptNotifyLoop(listener *Listener, events chan<- Mapping) {
 		go func() {
 			defer handlers.Done()
 			defer listener.untrackConn(conn)
-			handleNotifyConn(conn, events, listener.done)
+			handleNotifyConn(conn, events, listener.done, listener.token)
 		}()
 	}
 }
@@ -137,14 +167,13 @@ func (l *Listener) untrackConn(conn net.Conn) {
 	delete(l.conns, conn)
 }
 
-func handleNotifyConn(conn net.Conn, events chan<- Mapping, done <-chan struct{}) {
+func handleNotifyConn(conn net.Conn, events chan<- Mapping, done <-chan struct{}, token string) {
 	defer conn.Close()
 
 	scanner := bufio.NewScanner(conn)
 	for scanner.Scan() {
-		var mapping Mapping
-		if err := json.Unmarshal(scanner.Bytes(), &mapping); err != nil {
-			log.Printf("解析 natmap notify 事件失败: %v", err)
+		mapping, ok := decodeNotifyMapping(scanner.Bytes(), token)
+		if !ok {
 			continue
 		}
 		select {
@@ -161,4 +190,26 @@ func handleNotifyConn(conn net.Conn, events chan<- Mapping, done <-chan struct{}
 			log.Printf("读取 natmap notify 事件失败: %v", err)
 		}
 	}
+}
+
+func decodeNotifyMapping(payload []byte, token string) (Mapping, bool) {
+	if token == "" {
+		var mapping Mapping
+		if err := json.Unmarshal(payload, &mapping); err != nil {
+			log.Printf("解析 natmap notify 事件失败: %v", err)
+			return Mapping{}, false
+		}
+		return mapping, true
+	}
+
+	var envelope notifyEnvelope
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		log.Printf("natmap notify 鉴权失败，已丢弃事件")
+		return Mapping{}, false
+	}
+	if envelope.Token != token {
+		log.Printf("natmap notify 鉴权失败，已丢弃事件")
+		return Mapping{}, false
+	}
+	return envelope.Mapping, true
 }

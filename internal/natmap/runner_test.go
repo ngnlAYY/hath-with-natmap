@@ -1,9 +1,14 @@
 package natmap
 
 import (
+	"bytes"
 	"context"
+	"log"
+	"net"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,6 +74,21 @@ func (f *fakeProcess) Stop(ctx context.Context) error {
 	return nil
 }
 
+func TestGenerateNotifyTokenReturnsHexToken(t *testing.T) {
+	token, err := GenerateNotifyToken()
+	if err != nil {
+		t.Fatalf("GenerateNotifyToken returned error: %v", err)
+	}
+	if len(token) != 64 {
+		t.Fatalf("token length = %d, want 64", len(token))
+	}
+	for _, char := range token {
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			t.Fatalf("token contains non-hex character %q", char)
+		}
+	}
+}
+
 func TestProcessRunnerStartBuildsNatmapSpec(t *testing.T) {
 	proc := newFakeProcess()
 	runner := &fakeProcessRunner{proc: proc}
@@ -101,6 +121,52 @@ func TestProcessRunnerStartBuildsNatmapSpec(t *testing.T) {
 	}
 	if processRunner.Done() != proc.Done() {
 		t.Fatalf("Done did not return underlying process channel")
+	}
+}
+
+func TestProcessRunnerStartIncludesNotifyTokenEnv(t *testing.T) {
+	runner := &fakeProcessRunner{proc: newFakeProcess()}
+	cfg := RunnerConfig{
+		BinaryPath:          "/usr/local/bin/natmap",
+		BindPort:            16000,
+		StunServer:          "stun.example.com:3478",
+		HTTPKeepaliveServer: "https://keepalive.example.com",
+		KeepaliveInterval:   30 * time.Second,
+		NotifyScript:        "/usr/local/bin/natmap-notify",
+		NotifyToken:         "secret-token",
+	}
+	processRunner := &ProcessRunner{Config: cfg, Runner: runner}
+
+	if err := processRunner.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	if len(runner.specs) != 1 {
+		t.Fatalf("Start calls = %d, want 1", len(runner.specs))
+	}
+	want := NotifyTokenEnv + "=secret-token"
+	if !containsString(runner.specs[0].Env, want) {
+		t.Fatalf("spec.Env = %#v, want to contain %q", runner.specs[0].Env, want)
+	}
+}
+
+func TestProcessRunnerStartOmitsNotifyTokenEnvWhenEmpty(t *testing.T) {
+	runner := &fakeProcessRunner{proc: newFakeProcess()}
+	cfg := RunnerConfig{
+		BinaryPath:          "/usr/local/bin/natmap",
+		BindPort:            16000,
+		StunServer:          "stun.example.com:3478",
+		HTTPKeepaliveServer: "https://keepalive.example.com",
+		KeepaliveInterval:   30 * time.Second,
+		NotifyScript:        "/usr/local/bin/natmap-notify",
+	}
+	processRunner := &ProcessRunner{Config: cfg, Runner: runner}
+
+	if err := processRunner.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if len(runner.specs[0].Env) != 0 {
+		t.Fatalf("spec.Env = %#v, want empty", runner.specs[0].Env)
 	}
 }
 
@@ -142,6 +208,73 @@ func TestProcessRunnerStopStopsProcessAndClearsIt(t *testing.T) {
 	}
 }
 
+func TestListenNotifyWithTokenReceivesMatchingTokenFromSendNotify(t *testing.T) {
+	t.Setenv(NotifyTokenEnv, "secret-token")
+	socketPath := filepath.Join(t.TempDir(), "notify.sock")
+	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
+	if err != nil {
+		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+	}
+	defer listener.Close()
+
+	if err := SendNotify(socketPath, validNotifyArgs()); err != nil {
+		t.Fatalf("SendNotify returned error: %v", err)
+	}
+
+	select {
+	case mapping := <-events:
+		if mapping.PublicPort != 45678 {
+			t.Fatalf("PublicPort = %d, want 45678", mapping.PublicPort)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for authenticated notify mapping")
+	}
+}
+
+func TestListenNotifyWithTokenRejectsMissingTokenWithoutLeakingLogContent(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "notify.sock")
+	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
+	if err != nil {
+		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+	}
+	defer listener.Close()
+
+	logs := captureLogs(t)
+	if err := sendRawNotify(socketPath, `{"PublicAddress":"203.0.113.10","PublicPort":45678,"IP4P":"192.0.2.20","PrivatePort":16000,"Protocol":"TCP","PrivateAddress":"10.0.0.2"}`); err != nil {
+		t.Fatalf("sendRawNotify returned error: %v", err)
+	}
+
+	assertNoMapping(t, events)
+	waitUntilStringContains(t, logs, "natmap notify 鉴权失败")
+	logText := logs.String()
+	if !strings.Contains(logText, "natmap notify 鉴权失败") {
+		t.Fatalf("log output = %q, want authentication failure", logText)
+	}
+	assertLogDoesNotLeakNotifyContent(t, logText)
+}
+
+func TestListenNotifyWithTokenRejectsWrongTokenWithoutLeakingLogContent(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "notify.sock")
+	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
+	if err != nil {
+		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+	}
+	defer listener.Close()
+
+	logs := captureLogs(t)
+	if err := sendRawNotify(socketPath, `{"token":"wrong-token","mapping":{"PublicAddress":"203.0.113.10","PublicPort":45678,"IP4P":"192.0.2.20","PrivatePort":16000,"Protocol":"TCP","PrivateAddress":"10.0.0.2"}}`); err != nil {
+		t.Fatalf("sendRawNotify returned error: %v", err)
+	}
+
+	assertNoMapping(t, events)
+	waitUntilStringContains(t, logs, "natmap notify 鉴权失败")
+	logText := logs.String()
+	if !strings.Contains(logText, "natmap notify 鉴权失败") {
+		t.Fatalf("log output = %q, want authentication failure", logText)
+	}
+	assertLogDoesNotLeakNotifyContent(t, logText)
+}
+
 func TestListenNotifyReceivesMappingSentBySendNotify(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
 	listener, events, err := ListenNotify(socketPath)
@@ -150,14 +283,7 @@ func TestListenNotifyReceivesMappingSentBySendNotify(t *testing.T) {
 	}
 	defer listener.Close()
 
-	err = SendNotify(socketPath, []string{
-		"203.0.113.10",
-		"45678",
-		"192.0.2.20",
-		"16000",
-		"TCP",
-		"10.0.0.2",
-	})
+	err = SendNotify(socketPath, validNotifyArgs())
 	if err != nil {
 		t.Fatalf("SendNotify returned error: %v", err)
 	}
@@ -172,5 +298,101 @@ func TestListenNotifyReceivesMappingSentBySendNotify(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for notify mapping")
+	}
+}
+
+func validNotifyArgs() []string {
+	return []string{
+		"203.0.113.10",
+		"45678",
+		"192.0.2.20",
+		"16000",
+		"TCP",
+		"10.0.0.2",
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func sendRawNotify(socketPath string, payload string) error {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_, err = conn.Write([]byte(payload + "\n"))
+	return err
+}
+
+func assertNoMapping(t *testing.T, events <-chan Mapping) {
+	t.Helper()
+	select {
+	case mapping := <-events:
+		t.Fatalf("received unexpected mapping: %+v", mapping)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func captureLogs(t *testing.T) *lockedBuffer {
+	t.Helper()
+	buf := &lockedBuffer{}
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	log.SetOutput(buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+	})
+	return buf
+}
+
+func waitUntilStringContains(t *testing.T, logs *lockedBuffer, want string) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		if strings.Contains(logs.String(), want) {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for log containing %q; logs=%q", want, logs.String())
+		case <-tick.C:
+		}
+	}
+}
+
+func assertLogDoesNotLeakNotifyContent(t *testing.T, logText string) {
+	t.Helper()
+	for _, leaked := range []string{"secret-token", "wrong-token", "203.0.113.10", "45678", "16000", "10.0.0.2"} {
+		if strings.Contains(logText, leaked) {
+			t.Fatalf("log output leaked %q: %q", leaked, logText)
+		}
 	}
 }

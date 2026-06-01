@@ -352,7 +352,7 @@ func TestHandleNotifyConnLogsInvalidJSONAndContinues(t *testing.T) {
 	done := make(chan struct{})
 	listenerDone := make(chan struct{})
 	go func() {
-		handleNotifyConn(server, events, listenerDone)
+		handleNotifyConn(server, events, listenerDone, "")
 		close(done)
 	}()
 

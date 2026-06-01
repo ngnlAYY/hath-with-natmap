@@ -36,10 +36,14 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
-	if err := os.MkdirAll("/run/hath-natmap", 0o755); err != nil {
+	if err := os.MkdirAll("/run/hath-natmap", 0o700); err != nil {
 		log.Fatalf("创建运行目录失败: %v", err)
 	}
-	listener, events, err := natmap.ListenNotify(notifySocketPath())
+	notifyToken, err := natmap.GenerateNotifyToken()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	listener, events, err := natmap.ListenNotifyWithToken(notifySocketPath(), notifyToken)
 	if err != nil {
 		log.Fatalf("启动 natmap notify socket 失败: %v", err)
 	}
@@ -58,6 +62,7 @@ func main() {
 			HTTPKeepaliveServer: cfg.Natmap.HTTPKeepaliveServer,
 			KeepaliveInterval:   cfg.Natmap.KeepaliveInterval.Duration,
 			NotifyScript:        cfg.Natmap.NotifyScript,
+			NotifyToken:         notifyToken,
 		},
 		Runner: runner,
 	}
