@@ -13,15 +13,23 @@ import (
 
 // Config describes hath-rust process settings and client credentials.
 type Config struct {
-	BinaryPath          string
-	DataDir             string
-	LogLevel            string
-	ForceBackgroundScan bool
-	RPCServerIP         string
-	ProxyURL            string
-	UseProxy            bool
-	ClientID            string
-	ClientKey           string
+	BinaryPath           string
+	DataDir              string
+	LogLevel             string
+	ForceBackgroundScan  bool
+	RPCServerIP          string
+	ProxyURL             string
+	UseProxy             bool
+	ClientID             string
+	ClientKey            string
+	DisableLogging       bool
+	FlushLog             bool
+	MaxConnection        int
+	DisableIPOriginCheck bool
+	DisableFloodControl  bool
+	EnableMetrics        bool
+	DisableServerHeader  bool
+	EnableH3             bool
 }
 
 // Args builds the hath-rust command arguments for the configured data paths and port.
@@ -46,6 +54,30 @@ func (c Config) Args(port int) []string {
 	}
 	if c.RPCServerIP != "" {
 		args = append(args, "--rpc-server-ip", c.RPCServerIP)
+	}
+	if c.DisableLogging {
+		args = append(args, "--disable-logging")
+	}
+	if c.FlushLog {
+		args = append(args, "--flush-log")
+	}
+	if c.MaxConnection > 0 {
+		args = append(args, "--max-connection", strconv.Itoa(c.MaxConnection))
+	}
+	if c.DisableIPOriginCheck {
+		args = append(args, "--disable-ip-origin-check")
+	}
+	if c.DisableFloodControl {
+		args = append(args, "--disable-flood-control")
+	}
+	if c.EnableMetrics {
+		args = append(args, "--enable-metrics")
+	}
+	if c.DisableServerHeader {
+		args = append(args, "--disable-server-header")
+	}
+	if c.EnableH3 {
+		args = append(args, "--enable-h3")
 	}
 
 	return args

@@ -81,6 +81,70 @@ func TestArgsOmitsProxyWhenProxyURLEmpty(t *testing.T) {
 	}
 }
 
+func TestArgsAppendsWhitelistedFlagsAfterExistingOptions(t *testing.T) {
+	cfg := Config{
+		DataDir:              "/data/hath",
+		LogLevel:             "warn",
+		ForceBackgroundScan:  true,
+		RPCServerIP:          "127.0.0.1",
+		ProxyURL:             "http://127.0.0.1:8080",
+		UseProxy:             true,
+		DisableLogging:       true,
+		FlushLog:             true,
+		MaxConnection:        128,
+		DisableIPOriginCheck: true,
+		DisableFloodControl:  true,
+		EnableMetrics:        true,
+		DisableServerHeader:  true,
+		EnableH3:             true,
+	}
+	got := cfg.Args(4567)
+	want := []string{
+		"--cache-dir", "/data/hath/cache",
+		"--data-dir", "/data/hath/data",
+		"--download-dir", "/data/hath/download",
+		"--log-dir", "/data/hath/log",
+		"--temp-dir", "/data/hath/tmp",
+		"--port", "4567",
+		"--proxy", "http://127.0.0.1:8080",
+		"--force-background-scan",
+		"-qq",
+		"--rpc-server-ip", "127.0.0.1",
+		"--disable-logging",
+		"--flush-log",
+		"--max-connection", "128",
+		"--disable-ip-origin-check",
+		"--disable-flood-control",
+		"--enable-metrics",
+		"--disable-server-header",
+		"--enable-h3",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Args() = %#v, want %#v", got, want)
+	}
+}
+
+func TestArgsOmitsMaxConnectionWhenZero(t *testing.T) {
+	cfg := Config{
+		DataDir:       "/data/hath",
+		FlushLog:      true,
+		MaxConnection: 0,
+	}
+	got := cfg.Args(8080)
+	want := []string{
+		"--cache-dir", "/data/hath/cache",
+		"--data-dir", "/data/hath/data",
+		"--download-dir", "/data/hath/download",
+		"--log-dir", "/data/hath/log",
+		"--temp-dir", "/data/hath/tmp",
+		"--port", "8080",
+		"--flush-log",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Args() = %#v, want %#v", got, want)
+	}
+}
+
 func TestArgsQuietFlagMapping(t *testing.T) {
 	tests := []struct {
 		name     string
