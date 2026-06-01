@@ -11,23 +11,44 @@ import (
 
 type RunnerConfig struct {
 	BinaryPath          string
+	AddressFamily       string
+	UDPMode             bool
 	BindPort            int
 	StunServer          string
 	HTTPKeepaliveServer string
 	KeepaliveInterval   time.Duration
 	NotifyScript        string
+	Interface           string
+	FWMark              string
+	UDPCheckCycle       int
 	NotifyToken         string
 }
 
 func (c RunnerConfig) Args() []string {
-	return []string{
-		"-4",
+	args := []string{"-4"}
+	if c.AddressFamily == "ipv6" {
+		args[0] = "-6"
+	}
+	if c.UDPMode {
+		args = append(args, "-u")
+	}
+	args = append(args,
 		"-b", strconv.Itoa(c.BindPort),
 		"-s", c.StunServer,
 		"-h", c.HTTPKeepaliveServer,
 		"-k", strconv.FormatInt(int64(c.KeepaliveInterval/time.Second), 10),
 		"-e", c.NotifyScript,
+	)
+	if c.Interface != "" {
+		args = append(args, "-i", c.Interface)
 	}
+	if c.FWMark != "" {
+		args = append(args, "-f", c.FWMark)
+	}
+	if c.UDPCheckCycle > 0 {
+		args = append(args, "-c", strconv.Itoa(c.UDPCheckCycle))
+	}
+	return args
 }
 
 type ProcessRunner struct {

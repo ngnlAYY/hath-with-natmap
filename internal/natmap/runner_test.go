@@ -17,22 +17,69 @@ import (
 )
 
 func TestRunnerConfigArgsBuildsBindModeArguments(t *testing.T) {
+	tests := []struct {
+		name          string
+		addressFamily string
+		wantAF        string
+	}{
+		{name: "default address family", addressFamily: "", wantAF: "-4"},
+		{name: "explicit ipv4", addressFamily: "ipv4", wantAF: "-4"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := RunnerConfig{
+				AddressFamily:       tc.addressFamily,
+				BindPort:            16000,
+				StunServer:          "stun.example.com:3478",
+				HTTPKeepaliveServer: "https://keepalive.example.com",
+				KeepaliveInterval:   30 * time.Second,
+				NotifyScript:        "/usr/local/bin/natmap-notify",
+			}
+
+			got := cfg.Args()
+			want := []string{
+				tc.wantAF,
+				"-b", "16000",
+				"-s", "stun.example.com:3478",
+				"-h", "https://keepalive.example.com",
+				"-k", "30",
+				"-e", "/usr/local/bin/natmap-notify",
+			}
+
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("Args() = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestRunnerConfigArgsBuildsIPv6UDPAndWhitelistArguments(t *testing.T) {
 	cfg := RunnerConfig{
+		AddressFamily:       "ipv6",
+		UDPMode:             true,
 		BindPort:            16000,
 		StunServer:          "stun.example.com:3478",
 		HTTPKeepaliveServer: "https://keepalive.example.com",
 		KeepaliveInterval:   30 * time.Second,
 		NotifyScript:        "/usr/local/bin/natmap-notify",
+		Interface:           "eth0",
+		FWMark:              "0x66",
+		UDPCheckCycle:       7,
 	}
 
 	got := cfg.Args()
 	want := []string{
-		"-4",
+		"-6",
+		"-u",
 		"-b", "16000",
 		"-s", "stun.example.com:3478",
 		"-h", "https://keepalive.example.com",
 		"-k", "30",
 		"-e", "/usr/local/bin/natmap-notify",
+		"-i", "eth0",
+		"-f", "0x66",
+		"-c", "7",
 	}
 
 	if !reflect.DeepEqual(got, want) {
