@@ -36,6 +36,7 @@ type ProcessRunner struct {
 	Listener *Listener
 	mu       sync.Mutex
 	proc     process.Process
+	pid      int
 }
 
 func (r *ProcessRunner) Start(ctx context.Context) error {
@@ -49,20 +50,27 @@ func (r *ProcessRunner) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	pid := proc.PID()
 	if r.Listener != nil {
-		r.Listener.AllowPID(proc.PID())
+		r.Listener.AllowPID(pid)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.proc = proc
+	r.pid = pid
 	return nil
 }
 
 func (r *ProcessRunner) Stop(ctx context.Context) error {
 	r.mu.Lock()
 	proc := r.proc
+	pid := r.pid
 	r.proc = nil
+	r.pid = 0
 	r.mu.Unlock()
+	if r.Listener != nil {
+		r.Listener.RevokePID(pid)
+	}
 	if proc == nil {
 		return nil
 	}

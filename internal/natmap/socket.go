@@ -28,7 +28,7 @@ type Listener struct {
 	connsMu   sync.Mutex
 	conns     map[net.Conn]struct{}
 	allowedMu sync.Mutex
-	allowed   map[int]struct{}
+	allowed   map[int]string
 }
 
 type notifyEnvelope struct {
@@ -81,7 +81,7 @@ func ListenNotifyWithToken(socketPath string, token string) (*Listener, <-chan M
 		done:     make(chan struct{}),
 		token:    token,
 		conns:    make(map[net.Conn]struct{}),
-		allowed:  make(map[int]struct{}),
+		allowed:  make(map[int]string),
 	}
 	go acceptNotifyLoop(notifyListener, events)
 
@@ -178,9 +178,22 @@ func (l *Listener) AllowPID(pid int) {
 	if pid <= 0 {
 		return
 	}
+	startTime, err := processStartTime(pid)
+	if err != nil {
+		return
+	}
 	l.allowedMu.Lock()
 	defer l.allowedMu.Unlock()
-	l.allowed[pid] = struct{}{}
+	l.allowed[pid] = startTime
+}
+
+func (l *Listener) RevokePID(pid int) {
+	if pid <= 0 {
+		return
+	}
+	l.allowedMu.Lock()
+	defer l.allowedMu.Unlock()
+	delete(l.allowed, pid)
 }
 
 func (l *Listener) peerAllowed(conn net.Conn) bool {
@@ -198,8 +211,9 @@ func (l *Listener) peerAllowed(conn net.Conn) bool {
 
 func (l *Listener) pidAllowed(pid int) bool {
 	for pid > 0 {
-		if _, ok := l.allowed[pid]; ok {
-			return true
+		if startTime, ok := l.allowed[pid]; ok {
+			currentStartTime, err := processStartTime(pid)
+			return err == nil && currentStartTime == startTime
 		}
 		parent, err := parentPID(pid)
 		if err != nil || parent == pid {
@@ -253,19 +267,37 @@ func peerPID(conn net.Conn) (int, error) {
 }
 
 func parentPID(pid int) (int, error) {
-	content, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	fields, err := processStatFields(pid)
 	if err != nil {
 		return 0, err
 	}
-	end := strings.LastIndexByte(string(content), ')')
-	if end < 0 || end+2 >= len(content) {
-		return 0, fmt.Errorf("解析进程父 PID 失败")
-	}
-	fields := strings.Fields(string(content[end+2:]))
 	if len(fields) < 2 {
 		return 0, fmt.Errorf("解析进程父 PID 失败")
 	}
 	return strconv.Atoi(fields[1])
+}
+
+func processStartTime(pid int) (string, error) {
+	fields, err := processStatFields(pid)
+	if err != nil {
+		return "", err
+	}
+	if len(fields) < 20 {
+		return "", fmt.Errorf("解析进程启动时间失败")
+	}
+	return fields[19], nil
+}
+
+func processStatFields(pid int) ([]string, error) {
+	content, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return nil, err
+	}
+	end := strings.LastIndexByte(string(content), ')')
+	if end < 0 || end+2 >= len(content) {
+		return nil, fmt.Errorf("解析进程 stat 失败")
+	}
+	return strings.Fields(string(content[end+2:])), nil
 }
 
 func decodeNotifyMapping(payload []byte, token string) (Mapping, bool) {

@@ -134,7 +134,7 @@ func TestProcessRunnerStartAllowsStartedNatmapPID(t *testing.T) {
 	proc := newFakeProcess()
 	proc.pid = os.Getpid()
 	runner := &fakeProcessRunner{proc: proc}
-	listener := &Listener{token: "secret-token", allowed: make(map[int]struct{})}
+	listener := &Listener{token: "secret-token", allowed: make(map[int]string)}
 	processRunner := &ProcessRunner{Runner: runner, Listener: listener}
 
 	if err := processRunner.Start(context.Background()); err != nil {
@@ -142,6 +142,31 @@ func TestProcessRunnerStartAllowsStartedNatmapPID(t *testing.T) {
 	}
 	if !listener.pidAllowed(os.Getpid()) {
 		t.Fatal("started natmap PID was not allowed")
+	}
+}
+
+func TestProcessRunnerStopRevokesStartedNatmapPID(t *testing.T) {
+	proc := newFakeProcess()
+	proc.pid = os.Getpid()
+	runner := &fakeProcessRunner{proc: proc}
+	listener := &Listener{token: "secret-token", allowed: make(map[int]string)}
+	processRunner := &ProcessRunner{Runner: runner, Listener: listener}
+
+	if err := processRunner.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if err := processRunner.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
+	}
+	if listener.pidAllowed(os.Getpid()) {
+		t.Fatal("stopped natmap PID remained allowed")
+	}
+}
+
+func TestListenerRejectsAllowedPIDWithChangedStartTime(t *testing.T) {
+	listener := &Listener{token: "secret-token", allowed: map[int]string{os.Getpid(): "different-start-time"}}
+	if listener.pidAllowed(os.Getpid()) {
+		t.Fatal("pidAllowed accepted matching PID with different start time")
 	}
 }
 
