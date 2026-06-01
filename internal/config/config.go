@@ -5,12 +5,18 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 const DefaultConfigPath = "/config/config.yaml"
+
+var (
+	bandwidthInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,14}$`)
+	bandwidthLimitPattern     = regexp.MustCompile(`^[1-9][0-9]*(bit|kbit|mbit|gbit)$`)
+)
 
 type Duration struct {
 	time.Duration
@@ -158,10 +164,10 @@ func (c Config) Validate() error {
 		}
 	}
 	if c.Bandwidth.Enabled {
-		if err := requireString("bandwidth.upload_limit", c.Bandwidth.UploadLimit); err != nil {
+		if err := validateBandwidthLimit(c.Bandwidth.UploadLimit); err != nil {
 			return err
 		}
-		if err := requireString("bandwidth.interface", c.Bandwidth.Interface); err != nil {
+		if err := validateBandwidthInterface(c.Bandwidth.Interface); err != nil {
 			return err
 		}
 	}
@@ -225,6 +231,20 @@ func isAllowedProxyScheme(scheme string) bool {
 	default:
 		return false
 	}
+}
+
+func validateBandwidthLimit(limit string) error {
+	if !bandwidthLimitPattern.MatchString(limit) {
+		return fmt.Errorf("bandwidth.upload_limit 必须是正整数加 bit、kbit、mbit 或 gbit 单位")
+	}
+	return nil
+}
+
+func validateBandwidthInterface(name string) error {
+	if !bandwidthInterfacePattern.MatchString(name) {
+		return fmt.Errorf("bandwidth.interface 必须是 1 到 15 位的网络接口名")
+	}
+	return nil
 }
 
 func validateLogLevel(level string) error {

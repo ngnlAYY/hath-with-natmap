@@ -3,7 +3,11 @@ package bandwidth
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
 )
 
 type CommandRunner interface {
@@ -13,11 +17,37 @@ type CommandRunner interface {
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
-	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("执行命令失败: %s %v, 输出: %s: %w", name, args, string(output), err)
+	if err := exec.CommandContext(ctx, name, args...).Run(); err != nil {
+		return fmt.Errorf("执行命令失败: %s %v: %w", name, args, err)
 	}
 	return nil
+}
+
+func CheckNETAdmin() error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("tc 上传限速仅支持 Linux")
+	}
+	status, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return fmt.Errorf("读取进程 capability 失败: %w", err)
+	}
+	for _, line := range strings.Split(string(status), "\n") {
+		if strings.HasPrefix(line, "CapEff:") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
+				return fmt.Errorf("解析进程 capability 失败")
+			}
+			capabilityMask, err := strconv.ParseUint(fields[1], 16, 64)
+			if err != nil {
+				return fmt.Errorf("解析进程 capability 失败: %w", err)
+			}
+			if capabilityMask&(1<<12) == 0 {
+				return fmt.Errorf("缺少 NET_ADMIN capability，无法配置 tc 上传限速")
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("进程 capability 信息缺少 CapEff")
 }
 
 type Limiter struct {

@@ -135,6 +135,41 @@ func TestValidateRejectsUnsupportedProxyScheme(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsInvalidBandwidthLimit(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "enabled: false", "enabled: true", 1)
+	cfgText = strings.Replace(cfgText, "upload_limit: 10mbit", "upload_limit: '10; rm -rf /'", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "bandwidth.upload_limit") {
+		t.Fatalf("Load() error = %v, want bandwidth.upload_limit validation error", err)
+	}
+}
+
+func TestValidateRejectsInvalidBandwidthInterface(t *testing.T) {
+	tests := []string{"eth0;rm", "-eth0"}
+	for _, iface := range tests {
+		t.Run(iface, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgText := strings.Replace(validConfigYAML(t, dir), "enabled: false", "enabled: true", 1)
+			cfgText = strings.Replace(cfgText, "interface: eth0", "interface: '"+iface+"'", 1)
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+				t.Fatalf("写入配置失败: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), "bandwidth.interface") {
+				t.Fatalf("Load() error = %v, want bandwidth.interface validation error", err)
+			}
+		})
+	}
+}
+
 func TestEnsureWritableDirRemovesProbeFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgText := validConfigYAML(t, dir)

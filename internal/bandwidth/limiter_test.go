@@ -51,6 +51,16 @@ func TestClearDeletesRootQdisc(t *testing.T) {
 	}
 }
 
+func TestExecRunnerErrorDoesNotIncludeCommandOutput(t *testing.T) {
+	err := ExecRunner{}.Run(context.Background(), "false")
+	if err == nil {
+		t.Fatal("Run() error = nil, want error")
+	}
+	if strings.Contains(err.Error(), "输出") {
+		t.Fatalf("Run() error included command output context: %v", err)
+	}
+}
+
 func TestApplyWrapsRunnerErrorWithChineseContext(t *testing.T) {
 	runnerErr := errors.New("runner failed")
 	fake := &fakeCommandRunner{err: runnerErr}
