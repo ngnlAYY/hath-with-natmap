@@ -1,56 +1,100 @@
 # e-hentai 账号 Cookie 与 Hentai@Home 客户端信息。
 ehentai:
+  # e-hentai Cookie 中的 ipb_member_id。
   member_id: "123456"
+  # e-hentai Cookie 中的 ipb_pass_hash；不要提交真实值。
   pass_hash: "example-pass-hash"
+  # Hentai@Home client ID，用于更新端口并生成 client_login。
   client_id: "12345"
+  # Hentai@Home client key，用于生成 hath-rust 的 client_login。
   client_key: "example-client-key"
 
-# natmap 和 hath-rust 共享这个固定本地端口。
+# natmap 和 hath-rust 共享的网络配置。
 network:
+  # natmap bind 模式和 hath-rust 共同使用的固定本地端口。
   bind_port: 4567
+  # 更新 Hentai@Home 公网端口时的 HTTP 超时时间。
   external_update_timeout: 60s
 
+# natmap 进程配置；只开放适合容器编排的白名单参数。
 natmap:
+  # natmap 二进制路径；默认镜像通常不需要修改。
   binary_path: /usr/local/bin/natmap
+  # STUN 服务器地址，对应 natmap -s。
   stun_server: stun.nextcloud.com:3478
+  # TCP keepalive 目标地址，对应 natmap -h。
   http_keepalive_server: www.baidu.com:80
+  # keepalive 间隔，对应 natmap -k。
   keepalive_interval: 15s
+  # natmap 映射变化时调用的 notify 脚本；由编排器控制，不建议修改。
   notify_script: /usr/local/bin/natmap-notify.sh
+  # 地址族：ipv4 对应 -4，ipv6 对应 -6。
   address_family: ipv4
+  # 是否启用 UDP 模式；true 时传递 -u。
   udp_mode: false
+  # 可选网卡名或源 IP；为空时不传递 -i。
   interface: ""
+  # 可选 fwmark；支持十进制、八进制或 0x 十六进制，为空时不传递 -f。
   fwmark: ""
+  # UDP STUN 检查周期；0 表示沿用 natmap 默认值，不传递 -c。
   udp_check_cycle: 0
 
+# hath-rust 进程配置；端口和目录仍由编排器固定管理。
 hath:
+  # hath-rust 二进制路径；默认镜像通常不需要修改。
   binary_path: /usr/local/bin/hath-rust
+  # hath-rust 数据根目录；cache、data、download、log、tmp 会从这里派生。
   data_dir: /data/hath
+  # 日志级别：debug 不传 -q，info/warn/error/off 分别映射为 -q/-qq/-qqq/-qqqq。
   log_level: info
+  # 是否强制后台扫描，对应 --force-background-scan。
   force_background_scan: true
+  # 可选 RPC server IP；为空时不传递 --rpc-server-ip。
   rpc_server_ip: ""
+  # 是否禁用非错误日志文件写入，对应 --disable-logging。
   disable_logging: false
+  # 是否每行日志都刷盘，对应 --flush-log。
   flush_log: false
+  # 最大连接数；0 表示不传递 --max-connection。
   max_connection: 0
+  # 是否禁用 IP origin 检查，对应 --disable-ip-origin-check。
   disable_ip_origin_check: false
+  # 是否禁用 flood control，对应 --disable-flood-control。
   disable_flood_control: false
+  # 是否启用 metrics endpoint，对应 --enable-metrics。
   enable_metrics: false
+  # 是否禁用 Server header，对应 --disable-server-header。
   disable_server_header: false
+  # 是否启用实验性 HTTP/3，对应 --enable-h3。
   enable_h3: false
 
+# 代理配置；用于更新 Hentai@Home 端口，也可选择给 hath-rust 下载缓存使用。
 proxy:
+  # 是否让编排器访问 e-hentai/Hentai@Home 设置页时使用代理。
   enabled: true
+  # 代理地址，支持 http、https 和 socks5。
   url: http://127.0.0.1:8080
+  # 是否让 hath-rust 下载缓存时使用同一个代理。
   use_for_hath_downloads: false
 
-# 需要限制上传带宽时再启用；容器运行参数必须授予 NET_ADMIN capability。
+# 上传限速配置；需要限制上传带宽时再启用，容器运行参数必须授予 NET_ADMIN capability。
 bandwidth:
+  # 是否启用 tc 上传限速。
   enabled: false
+  # 上传限速值，支持 bit、kbit、mbit、gbit。
   upload_limit: 10mbit
+  # 应用 tc 规则的出口网卡。
   interface: eth0
 
+# 编排器运行时超时和重试配置。
 runtime:
+  # 停止 natmap 和 hath-rust 的最大等待时间。
   shutdown_timeout: 30s
+  # natmap 异常退出后重新启动前的等待时间。
   restart_delay: 5s
+  # 可重试操作的退避配置。
   retry:
+    # 初始重试等待时间。
     initial_delay: 5s
+    # 最大重试等待时间。
     max_delay: 5m

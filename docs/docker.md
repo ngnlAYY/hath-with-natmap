@@ -29,6 +29,12 @@ docker run --rm \
   hath-with-natmap:local
 ```
 
+也可以使用 Docker Compose 示例：
+
+```bash
+docker compose -f docker/docker-compose.yaml up -d --build
+```
+
 如果启用了 `bandwidth.enabled`，添加 `NET_ADMIN` capability：
 
 ```bash

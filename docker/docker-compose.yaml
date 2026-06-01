@@ -1,0 +1,33 @@
+# Docker Compose 示例。
+#
+# 使用方式（在仓库根目录执行）：
+#   cp configs/config.example.yaml config.yaml
+#   docker compose -f docker/docker-compose.yaml up -d --build
+#
+# 本项目推荐使用 host network，因为 natmap 和 hath-rust 需要共享固定本地端口。
+
+name: hath-with-natmap
+
+services:
+  hath-with-natmap:
+    image: hath:natmap-rust
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: hath-with-natmap
+    network_mode: host
+    restart: unless-stopped
+
+    # 如果 config.yaml 中启用了 bandwidth.enabled: true，请取消下面两行注释。
+    # cap_add:
+    #   - NET_ADMIN
+
+    volumes:
+      # 主配置文件；请先从 configs/config.example.yaml 复制并填入真实账号信息。
+      - ../config.yaml:/config/config.yaml:ro
+      # hath-rust 数据目录；需要确保容器内 hath 用户有写入权限。
+      - ../hath:/data/hath
+
+    environment:
+      # 容器时区；可按需要改为其它 IANA 时区名称。
+      TZ: Asia/Shanghai

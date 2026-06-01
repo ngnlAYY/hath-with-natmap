@@ -45,6 +45,12 @@ docker run --rm \
 --cap-add NET_ADMIN
 ```
 
+也可以使用 Docker Compose 示例：
+
+```bash
+docker compose -f docker/docker-compose.yaml up -d --build
+```
+
 ## 文档
 
 - [配置说明](docs/configuration.md)
