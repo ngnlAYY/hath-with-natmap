@@ -1,6 +1,6 @@
 # Docker 运行
 
-本项目只支持 Docker 运行。推荐使用 host network，因为 `natmap` 和 `hath-rust` 需要共享固定本地端口并暴露公网映射。
+本项目只支持 Docker 运行。推荐使用 host network，因为 `natmap` 和 `hath-rust` 需要共享固定本地端口并暴露公网映射；如果使用 `mapping.mode: upnp`，同样推荐 `--net host`，因为容器需要在宿主机所在局域网中发现路由器的 UPnP/IGD 服务。
 
 ## 构建
 
@@ -41,7 +41,7 @@ docker compose -f docker/docker-compose.yaml up -d
 docker compose -f docker/docker-compose.build.yaml up -d --build
 ```
 
-如果启用了 `bandwidth.enabled`，添加 `NET_ADMIN` capability：
+`mapping.mode: upnp` 本身不需要 `NET_ADMIN`；只有启用了 `bandwidth.enabled` 时，才需要额外添加 `NET_ADMIN` capability：
 
 ```bash
 docker run --rm \
@@ -57,8 +57,8 @@ docker run --rm \
 
 ## 权限
 
-- `--net host`：让 `natmap` 和 `hath-rust` 使用宿主机网络栈。
-- `--cap-add NET_ADMIN`：仅在启用 `bandwidth.enabled` 时需要。
+- `--net host`：让 `natmap` 和 `hath-rust` 使用宿主机网络栈；`mapping.mode: upnp` 时也推荐开启，便于在宿主机所在局域网中发现路由器 UPnP/IGD。
+- `--cap-add NET_ADMIN`：仅在启用 `bandwidth.enabled` 时需要；UPnP 映射本身不依赖这个 capability。
 - `/config/config.yaml`：只读挂载配置文件。
 - `/data/hath`：持久化 `hath-rust` 数据。
 

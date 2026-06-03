@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -143,6 +144,155 @@ func TestLoadParameterWhitelistConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultsMappingModeToNatmap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(validConfigYAML(t, dir)), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Mapping.Mode != "natmap" {
+		t.Fatalf("Mapping.Mode = %q, want natmap", cfg.Mapping.Mode)
+	}
+}
+
+func TestLoadUPnPModeDoesNotRequireNatmapFields(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := validConfigYAML(t, dir)
+	cfgText = regexp.MustCompile(`(?m)^  binary_path: .+\n`).ReplaceAllString(cfgText, "")
+	cfgText = strings.Replace(cfgText, "hath:\n", "hath:\n  binary_path: \""+filepath.Join(dir, "hath-rust")+"\"\n", 1)
+	cfgText = strings.Replace(cfgText, "natmap:\n", "mapping:\n  mode: upnp\nupnp:\n  lease_duration: 30\n  description: upnp-test\nnatmap:\n", 1)
+	cfgText = strings.Replace(cfgText, "  stun_server: stun.nextcloud.com:3478\n", "", 1)
+	cfgText = strings.Replace(cfgText, "  http_keepalive_server: www.baidu.com:80\n", "", 1)
+	cfgText = strings.Replace(cfgText, "  keepalive_interval: 15s\n", "", 1)
+	cfgText = strings.Replace(cfgText, "  notify_script: /usr/local/bin/natmap-notify.sh\n", "", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Mapping.Mode != "upnp" {
+		t.Fatalf("Mapping.Mode = %q, want upnp", cfg.Mapping.Mode)
+	}
+}
+
+func TestLoadUPnPModeIgnoresNatmapOnlyFields(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "natmap:\n", `mapping:
+  mode: upnp
+upnp:
+  lease_duration: 30
+  description: upnp-test
+natmap:
+  address_family: ipx
+  interface: 'eth 0'
+  fwmark: mark
+  udp_check_cycle: -1
+`, 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Mapping.Mode != "upnp" {
+		t.Fatalf("Mapping.Mode = %q, want upnp", cfg.Mapping.Mode)
+	}
+}
+
+func TestValidateRejectsInvalidMappingMode(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "natmap:\n", "mapping:\n  mode: pcp\nnatmap:\n", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "mapping.mode") {
+		t.Fatalf("Load() error = %v, want mapping.mode validation error", err)
+	}
+}
+
+func TestValidateRejectsInvalidUPnPConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		replaceText string
+		wantError   string
+	}{
+		{
+			name: "negative lease duration",
+			replaceText: `mapping:
+  mode: upnp
+upnp:
+  lease_duration: -1
+  description: upnp-test
+natmap:
+`,
+			wantError: "upnp.lease_duration",
+		},
+		{
+			name: "lease duration exceeds uint32",
+			replaceText: `mapping:
+  mode: upnp
+upnp:
+  lease_duration: 4294967296
+  description: upnp-test
+natmap:
+`,
+			wantError: "upnp.lease_duration",
+		},
+		{
+			name: "empty description",
+			replaceText: `mapping:
+  mode: upnp
+upnp:
+  lease_duration: 30
+  description: ""
+natmap:
+`,
+			wantError: "upnp.description",
+		},
+		{
+			name: "missing description",
+			replaceText: `mapping:
+  mode: upnp
+upnp:
+  lease_duration: 0
+natmap:
+`,
+			wantError: "upnp.description",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgText := strings.Replace(validConfigYAML(t, dir), "natmap:\n", tt.replaceText, 1)
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+				t.Fatalf("写入配置失败: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("Load() error = %v, want %s validation error", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsMissingSecret(t *testing.T) {
 	dir := t.TempDir()
 	cfgText := strings.Replace(validConfigYAML(t, dir), `pass_hash: "example-pass-hash"`, `pass_hash: ""`, 1)
@@ -182,6 +332,36 @@ func TestValidateRejectsEnabledProxyWithoutURL(t *testing.T) {
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "proxy.url") {
 		t.Fatalf("Load() error = %v, want proxy.url validation error", err)
+	}
+}
+
+func TestValidateRequiresProxyURLWhenUsedForHathDownloads(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "  enabled: true", "  enabled: false", 1)
+	cfgText = strings.Replace(cfgText, "  url: http://127.0.0.1:8080", "  url: ''", 1)
+	cfgText = strings.Replace(cfgText, "  use_for_hath_downloads: false", "  use_for_hath_downloads: true", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "proxy.url") {
+		t.Fatalf("Load() error = %v, want proxy.url validation error", err)
+	}
+}
+
+func TestValidateRejectsProxyURLWithCredentials(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "url: http://127.0.0.1:8080", "url: http://user:pass@127.0.0.1:8080", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "proxy.url 不能包含用户名或密码") {
+		t.Fatalf("Load() error = %v, want proxy.url credential validation error", err)
 	}
 }
 

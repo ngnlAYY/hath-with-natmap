@@ -20,6 +20,18 @@
 - 容器是否使用 `--net host`。
 - `network.bind_port` 是否被其他进程占用。
 
+## UPnP 映射失败
+
+检查：
+
+- `mapping.mode` 是否设置为 `upnp`。
+- 路由器是否启用 UPnP/IGD，并允许局域网客户端添加端口映射。
+- 容器是否使用 `--net host`。
+- `network.bind_port` 是否已被其他 UPnP 规则或设备占用。
+- 路由器后台是否显示 `upnp.description` 对应的映射。
+
+UPnP 模式只映射 TCP，不映射 UDP；公网端口和本地端口都等于 `network.bind_port`。如果映射失败，程序不会自动回退到 `natmap`。
+
 ## hath-rust 启动失败
 
 检查：

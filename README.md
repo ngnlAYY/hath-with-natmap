@@ -9,6 +9,7 @@
 - 公网映射未变化时不重复更新 Hentai@Home，也不重启正在运行的 `hath-rust`。
 - 首次获取映射或公网端口变化时自动更新 Hentai@Home 端口。
 - 可选自动配置 Linux `tc` 上传限速。
+- 可选使用路由器 UPnP/IGD 添加固定 TCP 端口映射。
 - 镜像内置 `hath-natmap`、`natmap`、`hath-rust` 和 notify 脚本。
 - 中文日志、中文错误信息和中文文档。
 
@@ -20,7 +21,7 @@
 cp configs/config.example.yaml config.yaml
 ```
 
-编辑 `config.yaml`，填入 e-hentai Cookie、Hentai@Home client 信息、固定端口、代理和限速配置。
+编辑 `config.yaml`，填入 e-hentai Cookie、Hentai@Home client 信息、固定端口、代理和限速配置。如果路由器支持 UPnP/IGD，可以将 `mapping.mode` 设置为 `upnp`；否则保持默认 `natmap`。
 
 构建镜像：
 

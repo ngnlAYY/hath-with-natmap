@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/ngnlAYY/hath-with-natter/internal/config"
 	"github.com/ngnlAYY/hath-with-natter/internal/hath"
 	"github.com/ngnlAYY/hath-with-natter/internal/natmap"
+	"github.com/ngnlAYY/hath-with-natter/internal/upnp"
 )
 
 type fakeBandwidthRunner struct {
@@ -32,8 +34,134 @@ func (f *fakeBandwidthRunner) Run(ctx context.Context, name string, args ...stri
 	return err
 }
 
+type fakeMainHath struct {
+	running   bool
+	starts    []int
+	stopCalls int
+}
+
+func (f *fakeMainHath) Start(ctx context.Context, port int) error {
+	f.running = true
+	f.starts = append(f.starts, port)
+	return nil
+}
+
+func (f *fakeMainHath) Stop(ctx context.Context) error {
+	f.running = false
+	f.stopCalls++
+	return nil
+}
+
+func (f *fakeMainHath) Running() bool {
+	return f.running
+}
+
+type fakeMainUpdater struct {
+	ports     []int
+	errUpdate error
+}
+
+func (f *fakeMainUpdater) UpdatePort(ctx context.Context, port int) error {
+	if f.errUpdate != nil {
+		return f.errUpdate
+	}
+	f.ports = append(f.ports, port)
+	return nil
+}
+
+type fakeMainUPnPMapper struct {
+	addCfg            upnp.Config
+	addCalls          int
+	addResult         upnp.Mapping
+	addErr            error
+	addCtxErr         error
+	addHadDeadline    bool
+	onAdd             func(int, upnp.Config)
+	deleteCfg         upnp.Config
+	deleteCalls       int
+	deleteErr         error
+	deleteCtxErr      error
+	deleteHadDeadline bool
+}
+
+func (f *fakeMainUPnPMapper) AddMapping(ctx context.Context, cfg upnp.Config) (upnp.Mapping, error) {
+	f.addCfg = cfg
+	f.addCalls++
+	f.addCtxErr = ctx.Err()
+	_, f.addHadDeadline = ctx.Deadline()
+	if f.onAdd != nil {
+		f.onAdd(f.addCalls, cfg)
+	}
+	if f.addErr != nil {
+		return upnp.Mapping{}, f.addErr
+	}
+	return f.addResult, nil
+}
+
+func (f *fakeMainUPnPMapper) DeleteMapping(ctx context.Context, cfg upnp.Config) error {
+	f.deleteCfg = cfg
+	f.deleteCalls++
+	f.deleteCtxErr = ctx.Err()
+	_, f.deleteHadDeadline = ctx.Deadline()
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	return nil
+}
+
 func nilNETAdmin() error {
 	return nil
+}
+
+func TestBuildUpdaterHTTPClientUsesExternalUpdateTimeout(t *testing.T) {
+	cfg := config.Config{
+		Network: config.NetworkConfig{
+			ExternalUpdateTimeout: config.Duration{Duration: 42 * time.Second},
+		},
+		Proxy: config.ProxyConfig{Enabled: false},
+	}
+
+	client, err := buildUpdaterHTTPClient(cfg)
+	if err != nil {
+		t.Fatalf("buildUpdaterHTTPClient returned error: %v", err)
+	}
+	if client.Timeout != 42*time.Second {
+		t.Fatalf("client.Timeout = %s, want %s", client.Timeout, 42*time.Second)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("client.Transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("transport.Proxy != nil, want nil")
+	}
+}
+
+func TestBuildUpdaterHTTPClientKeepsProxyAndTimeout(t *testing.T) {
+	cfg := config.Config{
+		Network: config.NetworkConfig{
+			ExternalUpdateTimeout: config.Duration{Duration: 42 * time.Second},
+		},
+		Proxy: config.ProxyConfig{
+			Enabled: true,
+			URL:     "http://127.0.0.1:8080",
+		},
+	}
+
+	client, err := buildUpdaterHTTPClient(cfg)
+	if err != nil {
+		t.Fatalf("buildUpdaterHTTPClient returned error: %v", err)
+	}
+	if client.Timeout != 42*time.Second {
+		t.Fatalf("client.Timeout = %s, want %s", client.Timeout, 42*time.Second)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("client.Transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy == nil {
+		t.Fatal("transport.Proxy = nil, want non-nil")
+	}
 }
 
 func TestBuildRuntimeWiresWhitelistConfig(t *testing.T) {

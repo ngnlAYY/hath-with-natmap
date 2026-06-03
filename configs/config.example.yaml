@@ -1,3 +1,15 @@
+# 端口映射模式；natmap 使用 STUN 获取 NAT 映射，upnp 使用路由器 UPnP/IGD。
+mapping:
+  # 可选值：natmap、upnp。upnp 失败不会自动回退 natmap。
+  mode: natmap
+
+# UPnP 模式配置；仅 mapping.mode: upnp 时使用。
+upnp:
+  # UPnP 映射租期，0 表示永久映射或使用路由器默认行为。
+  lease_duration: 0
+  # 路由器后台显示的端口映射描述。
+  description: hath-with-natter
+
 # e-hentai 账号 Cookie 与 Hentai@Home 客户端信息。
 ehentai:
   # e-hentai Cookie 中的 ipb_member_id。
@@ -72,7 +84,7 @@ hath:
 proxy:
   # 是否让编排器访问 e-hentai/Hentai@Home 设置页时使用代理。
   enabled: true
-  # 代理地址，支持 http、https 和 socks5。
+  # 代理地址，支持 http、https 和 socks5；当 enabled 或 use_for_hath_downloads 任一为 true 时必填，且不能包含用户名或密码。
   url: http://127.0.0.1:8080
   # 是否让 hath-rust 下载缓存时使用同一个代理。
   use_for_hath_downloads: false

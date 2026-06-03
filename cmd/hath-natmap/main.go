@@ -19,7 +19,30 @@ import (
 	"github.com/ngnlAYY/hath-with-natter/internal/natmap"
 	"github.com/ngnlAYY/hath-with-natter/internal/process"
 	"github.com/ngnlAYY/hath-with-natter/internal/supervisor"
+	"github.com/ngnlAYY/hath-with-natter/internal/upnp"
 )
+
+type upnpMapper interface {
+	AddMapping(ctx context.Context, cfg upnp.Config) (upnp.Mapping, error)
+	DeleteMapping(ctx context.Context, cfg upnp.Config) error
+}
+
+var newUPnPRenewTicker = func(interval time.Duration) (<-chan time.Time, func()) {
+	ticker := time.NewTicker(interval)
+	return ticker.C, ticker.Stop
+}
+
+var sleepUPnPRestart = func(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
@@ -55,6 +78,25 @@ func run(ctx context.Context, args []string) error {
 	}
 	defer clearBandwidth()
 
+	updaterHTTPClient, err := buildUpdaterHTTPClient(cfg)
+	if err != nil {
+		return err
+	}
+	updater := ehentai.Client{
+		HTTPClient: updaterHTTPClient,
+		MemberID:   cfg.EHentai.MemberID,
+		PassHash:   cfg.EHentai.PassHash,
+		ClientID:   cfg.EHentai.ClientID,
+	}
+
+	if cfg.Mapping.Mode == "upnp" {
+		runtime := buildRuntime(cfg, nil, nil, "")
+		if err := runUPnPModeWithRetry(ctx, cfg, runtime.Hath, updater, upnp.Client{}); err != nil {
+			return fmt.Errorf("运行失败: %w", err)
+		}
+		return nil
+	}
+
 	if err := os.MkdirAll("/run/hath-natmap", 0o700); err != nil {
 		return fmt.Errorf("创建运行目录失败: %w", err)
 	}
@@ -76,25 +118,144 @@ func run(ctx context.Context, args []string) error {
 	}()
 
 	runtime := buildRuntime(cfg, listener, events, notifyToken)
-
-	updaterHTTPClient := http.DefaultClient
-	if cfg.Proxy.Enabled {
-		proxyURL, err := url.Parse(cfg.Proxy.URL)
-		if err != nil {
-			return fmt.Errorf("解析代理 URL 失败: %w", err)
-		}
-		updaterHTTPClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
-	}
-	updater := ehentai.Client{
-		HTTPClient: updaterHTTPClient,
-		MemberID:   cfg.EHentai.MemberID,
-		PassHash:   cfg.EHentai.PassHash,
-		ClientID:   cfg.EHentai.ClientID,
-	}
 	runtime.Updater = updater
 	if err := runtime.Run(ctx); err != nil {
 		return fmt.Errorf("运行失败: %w", err)
 	}
+	return nil
+}
+
+func buildUpdaterHTTPClient(cfg config.Config) (*http.Client, error) {
+	client := &http.Client{Timeout: cfg.Network.ExternalUpdateTimeout.Duration}
+	transport := &http.Transport{}
+	if !cfg.Proxy.Enabled {
+		transport.Proxy = nil
+		client.Transport = transport
+		return client, nil
+	}
+
+	proxyURL, err := url.Parse(cfg.Proxy.URL)
+	if err != nil {
+		return nil, fmt.Errorf("解析代理 URL 失败: %w", err)
+	}
+	transport.Proxy = http.ProxyURL(proxyURL)
+	client.Transport = transport
+	return client, nil
+}
+
+func runUPnPModeOnce(ctx context.Context, cfg config.Config, hathController supervisor.HathController, updater supervisor.PortUpdater, mapper upnpMapper) (func(), error) {
+	upnpCfg := upnp.Config{
+		Port:          cfg.Network.BindPort,
+		LeaseDuration: uint32(cfg.UPnP.LeaseDuration),
+		Description:   cfg.UPnP.Description,
+	}
+	operationCtx, cancel := upnpOperationContext(cfg)
+	mapping, err := mapper.AddMapping(operationCtx, upnpCfg)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+
+	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), cfg.Runtime.ShutdownTimeout.Duration)
+		defer cancel()
+		if err := mapper.DeleteMapping(cleanupCtx, upnpCfg); err != nil {
+			log.Printf("删除 UPnP 端口映射失败: %v", err)
+		}
+	}
+
+	coordinator := supervisor.Coordinator{Hath: hathController, Updater: updater, BindPort: cfg.Network.BindPort}
+	err = coordinator.HandleMapping(ctx, natmap.Mapping{
+		PublicAddress:  mapping.PublicAddress,
+		PublicPort:     mapping.PublicPort,
+		PrivatePort:    mapping.PrivatePort,
+		Protocol:       "TCP",
+		PrivateAddress: mapping.PrivateAddress,
+	})
+	if err != nil {
+		cleanup()
+		return nil, err
+	}
+	return cleanup, nil
+}
+
+func upnpOperationContext(cfg config.Config) (context.Context, context.CancelFunc) {
+	// 避免父 ctx 在路由器已写入映射后中断响应，导致调用方无法确认并清理该映射。
+	return context.WithTimeout(context.Background(), cfg.Runtime.ShutdownTimeout.Duration)
+}
+
+func runUPnPModeWithRetry(ctx context.Context, cfg config.Config, hathController supervisor.HathController, updater supervisor.PortUpdater, mapper upnpMapper) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		if err := runUPnPMode(ctx, cfg, hathController, updater, mapper); err != nil {
+			log.Printf("UPnP 运行期错误，准备自动恢复: %v", err)
+			if !sleepUPnPRestart(ctx, upnpRestartDelay(cfg)) {
+				return nil
+			}
+			continue
+		}
+		return nil
+	}
+}
+
+func upnpRestartDelay(cfg config.Config) time.Duration {
+	if cfg.Runtime.RestartDelay.Duration > 0 {
+		return cfg.Runtime.RestartDelay.Duration
+	}
+	if cfg.Runtime.Retry.InitialDelay.Duration > 0 {
+		return cfg.Runtime.Retry.InitialDelay.Duration
+	}
+	return 5 * time.Second
+}
+
+func runUPnPMode(ctx context.Context, cfg config.Config, hathController supervisor.HathController, updater supervisor.PortUpdater, mapper upnpMapper) error {
+	cleanup, err := runUPnPModeOnce(ctx, cfg, hathController, updater, mapper)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Runtime.ShutdownTimeout.Duration)
+		defer cancel()
+		if err := hathController.Stop(shutdownCtx); err != nil {
+			log.Printf("停止 hath-rust 失败: %v", err)
+		}
+	}()
+
+	if leaseDurationSeconds := uint32(cfg.UPnP.LeaseDuration); leaseDurationSeconds > 0 {
+		interval := time.Duration(leaseDurationSeconds) * time.Second / 2
+		tickCh, stopTicker := newUPnPRenewTicker(interval)
+		defer stopTicker()
+
+		upnpCfg := upnp.Config{
+			Port:          cfg.Network.BindPort,
+			LeaseDuration: leaseDurationSeconds,
+			Description:   cfg.UPnP.Description,
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				cleanup()
+				return nil
+			case <-tickCh:
+				operationCtx, cancel := upnpOperationContext(cfg)
+				_, err := mapper.AddMapping(operationCtx, upnpCfg)
+				cancel()
+				if err != nil {
+					if ctx.Err() != nil {
+						cleanup()
+						return nil
+					}
+					return fmt.Errorf("续租 UPnP 端口映射失败: %w", err)
+				}
+			}
+		}
+	}
+
+	<-ctx.Done()
+	cleanup()
 	return nil
 }
 

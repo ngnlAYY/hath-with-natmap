@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -17,6 +18,10 @@ import (
 const (
 	DefaultConfigPath            = "/config/config.yaml"
 	defaultExternalUpdateTimeout = 60 * time.Second
+	defaultMappingMode           = "natmap"
+	mappingModeNatmap            = "natmap"
+	mappingModeUPnP              = "upnp"
+	maxUPnPDescriptionLength     = 64
 )
 
 var (
@@ -47,6 +52,8 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 type Config struct {
 	EHentai   EHentaiConfig   `yaml:"ehentai"`
 	Network   NetworkConfig   `yaml:"network"`
+	Mapping   MappingConfig   `yaml:"mapping"`
+	UPnP      UPnPConfig      `yaml:"upnp"`
 	Natmap    NatmapConfig    `yaml:"natmap"`
 	Hath      HathConfig      `yaml:"hath"`
 	Proxy     ProxyConfig     `yaml:"proxy"`
@@ -64,6 +71,15 @@ type EHentaiConfig struct {
 type NetworkConfig struct {
 	BindPort              int      `yaml:"bind_port"`
 	ExternalUpdateTimeout Duration `yaml:"external_update_timeout"`
+}
+
+type MappingConfig struct {
+	Mode string `yaml:"mode"`
+}
+
+type UPnPConfig struct {
+	LeaseDuration int    `yaml:"lease_duration"`
+	Description   string `yaml:"description"`
 }
 
 type NatmapConfig struct {
@@ -130,6 +146,9 @@ func Load(path string) (Config, error) {
 	if !cfg.Network.ExternalUpdateTimeout.isSet {
 		cfg.Network.ExternalUpdateTimeout.Duration = defaultExternalUpdateTimeout
 	}
+	if cfg.Mapping.Mode == "" {
+		cfg.Mapping.Mode = defaultMappingMode
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -155,32 +174,42 @@ func (c Config) Validate() error {
 	if c.Network.ExternalUpdateTimeout.Duration <= 0 {
 		return fmt.Errorf("network.external_update_timeout 必须大于 0")
 	}
-	if err := requireExecutable("natmap.binary_path", c.Natmap.BinaryPath); err != nil {
+	if err := validateMappingMode(c.Mapping.Mode); err != nil {
 		return err
 	}
-	if err := requireString("natmap.stun_server", c.Natmap.StunServer); err != nil {
-		return err
+	if c.Mapping.Mode == mappingModeUPnP {
+		if err := validateUPnPConfig(c.UPnP); err != nil {
+			return err
+		}
 	}
-	if err := requireString("natmap.http_keepalive_server", c.Natmap.HTTPKeepaliveServer); err != nil {
-		return err
-	}
-	if c.Natmap.KeepaliveInterval.Duration <= 0 {
-		return fmt.Errorf("natmap.keepalive_interval 必须大于 0")
-	}
-	if err := requireString("natmap.notify_script", c.Natmap.NotifyScript); err != nil {
-		return err
-	}
-	if err := validateNatmapAddressFamily(c.Natmap.AddressFamily); err != nil {
-		return err
-	}
-	if err := validateNatmapInterface(c.Natmap.Interface); err != nil {
-		return err
-	}
-	if err := validateNatmapFWMark(c.Natmap.FWMark); err != nil {
-		return err
-	}
-	if c.Natmap.UDPCheckCycle < 0 {
-		return fmt.Errorf("natmap.udp_check_cycle 不能小于 0")
+	if c.Mapping.Mode == mappingModeNatmap {
+		if err := requireExecutable("natmap.binary_path", c.Natmap.BinaryPath); err != nil {
+			return err
+		}
+		if err := requireString("natmap.stun_server", c.Natmap.StunServer); err != nil {
+			return err
+		}
+		if err := requireString("natmap.http_keepalive_server", c.Natmap.HTTPKeepaliveServer); err != nil {
+			return err
+		}
+		if c.Natmap.KeepaliveInterval.Duration <= 0 {
+			return fmt.Errorf("natmap.keepalive_interval 必须大于 0")
+		}
+		if err := requireString("natmap.notify_script", c.Natmap.NotifyScript); err != nil {
+			return err
+		}
+		if err := validateNatmapAddressFamily(c.Natmap.AddressFamily); err != nil {
+			return err
+		}
+		if err := validateNatmapInterface(c.Natmap.Interface); err != nil {
+			return err
+		}
+		if err := validateNatmapFWMark(c.Natmap.FWMark); err != nil {
+			return err
+		}
+		if c.Natmap.UDPCheckCycle < 0 {
+			return fmt.Errorf("natmap.udp_check_cycle 不能小于 0")
+		}
 	}
 	if err := requireExecutable("hath.binary_path", c.Hath.BinaryPath); err != nil {
 		return err
@@ -194,13 +223,16 @@ func (c Config) Validate() error {
 	if c.Hath.MaxConnection < 0 {
 		return fmt.Errorf("hath.max_connection 必须大于等于 0")
 	}
-	if c.Proxy.Enabled {
+	if c.Proxy.Enabled || c.Proxy.UseForHathDownloads {
 		if err := requireString("proxy.url", c.Proxy.URL); err != nil {
 			return err
 		}
 		parsed, err := url.Parse(c.Proxy.URL)
 		if err != nil || parsed.Host == "" || !isAllowedProxyScheme(parsed.Scheme) {
 			return fmt.Errorf("proxy.url 必须是合法的 http、https 或 socks5 代理 URL")
+		}
+		if parsed.User != nil {
+			return fmt.Errorf("proxy.url 不能包含用户名或密码")
 		}
 	}
 	if c.Bandwidth.Enabled {
@@ -276,6 +308,31 @@ func isAllowedProxyScheme(scheme string) bool {
 func validateBandwidthLimit(limit string) error {
 	if !bandwidthLimitPattern.MatchString(limit) {
 		return fmt.Errorf("bandwidth.upload_limit 必须是正整数加 bit、kbit、mbit 或 gbit 单位")
+	}
+	return nil
+}
+
+func validateMappingMode(mode string) error {
+	switch mode {
+	case mappingModeNatmap, mappingModeUPnP:
+		return nil
+	default:
+		return fmt.Errorf("mapping.mode 必须是 %q 或 %q", mappingModeNatmap, mappingModeUPnP)
+	}
+}
+
+func validateUPnPConfig(cfg UPnPConfig) error {
+	if cfg.LeaseDuration < 0 {
+		return fmt.Errorf("upnp.lease_duration 不能小于 0")
+	}
+	if cfg.LeaseDuration > math.MaxUint32 {
+		return fmt.Errorf("upnp.lease_duration 不能大于 %d", uint64(math.MaxUint32))
+	}
+	if cfg.Description == "" {
+		return fmt.Errorf("upnp.description 不能为空")
+	}
+	if len(cfg.Description) > maxUPnPDescriptionLength {
+		return fmt.Errorf("upnp.description 不能超过 %d 字节", maxUPnPDescriptionLength)
 	}
 	return nil
 }

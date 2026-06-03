@@ -8,6 +8,18 @@
 cp configs/config.example.yaml config.yaml
 ```
 
+## mapping
+
+```yaml
+mapping:
+  mode: natmap
+```
+
+- `mode`：端口映射模式，只能是 `natmap` 或 `upnp`；默认 `natmap`。
+- `natmap`：使用现有的 STUN / NAT 映射流程获取公网端口。
+- `upnp`：使用路由器 UPnP/IGD 添加 TCP 端口映射；公网端口和本地端口都等于 `network.bind_port`。
+- `upnp` 失败不会自动回退到 `natmap`，需要根据日志和网络环境单独排查。
+
 ## ehentai
 
 ```yaml
@@ -65,6 +77,19 @@ natmap:
 
 `natmap -b` 固定来自 `network.bind_port`，`-e` 固定来自 notify 脚本，`-s/-h/-k` 继续来自上面的结构化字段。编排器不会开放 `-d`、forward mode 参数 `-C/-T/-t/-p`，也不支持 raw `extra_args`。
 
+## upnp
+
+```yaml
+upnp:
+  lease_duration: 0
+  description: hath-with-natter
+```
+
+- `lease_duration`：UPnP 映射租期，不能小于 `0`；`0` 表示永久映射或由路由器使用默认行为。程序正常退出时仍会主动删除映射。
+- `description`：路由器后台显示的端口映射描述；不能为空。
+- UPnP 模式只映射 TCP，不映射 UDP。
+- 适用于路由器支持 UPnP/IGD，且允许局域网客户端主动添加端口映射的网络环境。
+
 ## hath
 
 ```yaml
@@ -112,6 +137,8 @@ proxy:
 - `enabled`：更新 Hentai@Home 设置页时是否走代理。
 - `url`：代理地址，支持 `http`、`https` 和 `socks5`。
 - `use_for_hath_downloads`：是否让 `hath-rust` 下载缓存时走同一个代理。
+
+当 `proxy.enabled` 或 `proxy.use_for_hath_downloads` 任一为 `true` 时，`proxy.url` 必填；`proxy.url` 不能包含用户名或密码，因为传给 `hath-rust` 的代理参数可能出现在进程命令行中。
 
 使用 `--net host` 时，`127.0.0.1` 指向宿主机网络命名空间。
 
