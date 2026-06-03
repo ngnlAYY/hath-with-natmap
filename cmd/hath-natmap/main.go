@@ -49,7 +49,7 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("加载配置失败: %w", err)
 	}
 
-	clearBandwidth, err := applyBandwidthLimit(ctx, cfg, bandwidth.Limiter{Interface: cfg.Bandwidth.Interface, UploadLimit: cfg.Bandwidth.UploadLimit}, bandwidth.CheckNETAdmin)
+	clearBandwidth, err := applyBandwidthLimit(ctx, cfg, buildBandwidthLimiter(cfg), bandwidth.CheckNETAdmin)
 	if err != nil {
 		return err
 	}
@@ -77,13 +77,9 @@ func run(ctx context.Context, args []string) error {
 
 	runtime := buildRuntime(cfg, listener, events, notifyToken)
 
-	updaterHTTPClient := http.DefaultClient
-	if cfg.Proxy.Enabled {
-		proxyURL, err := url.Parse(cfg.Proxy.URL)
-		if err != nil {
-			return fmt.Errorf("解析代理 URL 失败: %w", err)
-		}
-		updaterHTTPClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	updaterHTTPClient, err := buildUpdaterHTTPClient(cfg)
+	if err != nil {
+		return err
 	}
 	updater := ehentai.Client{
 		HTTPClient: updaterHTTPClient,
@@ -96,6 +92,49 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("运行失败: %w", err)
 	}
 	return nil
+}
+
+func buildBandwidthLimiter(cfg config.Config) bandwidth.Limiter {
+	return bandwidth.Limiter{
+		Interface:             cfg.Bandwidth.Interface,
+		UploadLimit:           cfg.Bandwidth.UploadLimit,
+		AllowReplaceRootQdisc: cfg.Bandwidth.AllowReplaceRootQdisc,
+	}
+}
+
+func buildUpdaterHTTPClient(cfg config.Config) (*http.Client, error) {
+	client := &http.Client{Timeout: cfg.Network.ExternalUpdateTimeout.Duration}
+	transport, err := cloneDefaultHTTPTransport()
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.Proxy.Enabled {
+		transport.Proxy = nil
+		client.Transport = transport
+		return client, nil
+	}
+
+	proxyURL, err := url.Parse(cfg.Proxy.URL)
+	if err != nil {
+		return nil, fmt.Errorf("解析代理 URL 失败: %w", err)
+	}
+	transport.Proxy = http.ProxyURL(proxyURL)
+	client.Transport = transport
+	return client, nil
+}
+
+func cloneDefaultHTTPTransport() (*http.Transport, error) {
+	if http.DefaultTransport == nil {
+		return nil, fmt.Errorf("默认 HTTP transport 为空，无法克隆")
+	}
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("默认 HTTP transport 类型为 %T，无法克隆", http.DefaultTransport)
+	}
+	if transport == nil {
+		return nil, fmt.Errorf("默认 HTTP transport 为空，无法克隆")
+	}
+	return transport.Clone(), nil
 }
 
 func buildRuntime(cfg config.Config, listener *natmap.Listener, events <-chan natmap.Mapping, notifyToken string) supervisor.Runtime {
@@ -147,6 +186,7 @@ func buildRuntime(cfg config.Config, listener *natmap.Listener, events <-chan na
 		Events:          events,
 		BindPort:        cfg.Network.BindPort,
 		RetryDelay:      cfg.Runtime.Retry.InitialDelay.Duration,
+		RetryMaxDelay:   cfg.Runtime.Retry.MaxDelay.Duration,
 		RestartDelay:    cfg.Runtime.RestartDelay.Duration,
 		ShutdownTimeout: cfg.Runtime.ShutdownTimeout.Duration,
 	}

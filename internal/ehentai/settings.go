@@ -76,6 +76,19 @@ func (c Client) UpdatePort(ctx context.Context, port int) error {
 		return fmt.Errorf("提交 Hentai@Home 设置页失败: HTTP %d", postResp.StatusCode)
 	}
 
+	confirmedForm, locked, err := ParseSettingsForm(postResp.Body)
+	if err != nil {
+		return fmt.Errorf("确认 Hentai@Home 端口更新失败: %w", err)
+	}
+	if locked {
+		return ErrPortLocked
+	}
+
+	confirmedPort := confirmedForm.Get("f_port")
+	if confirmedPort != strconv.Itoa(port) {
+		return fmt.Errorf("确认 Hentai@Home 端口更新失败: 当前端口 %s, 目标端口 %d", confirmedPort, port)
+	}
+
 	return nil
 }
 

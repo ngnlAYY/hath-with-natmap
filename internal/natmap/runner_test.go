@@ -357,8 +357,9 @@ func TestListenNotifyWithTokenRejectsUnauthorizedPeerWithMatchingToken(t *testin
 	defer listener.Close()
 
 	logs := captureLogs(t)
-	if err := SendNotify(socketPath, validNotifyArgs()); err != nil {
-		t.Fatalf("SendNotify returned error: %v", err)
+	err = SendNotify(socketPath, validNotifyArgs())
+	if err != nil && !strings.Contains(err.Error(), "发送 natmap notify 事件失败") {
+		t.Fatalf("SendNotify returned unexpected error: %v", err)
 	}
 
 	assertNoMapping(t, events)

@@ -102,9 +102,10 @@ type ProxyConfig struct {
 }
 
 type BandwidthConfig struct {
-	Enabled     bool   `yaml:"enabled"`
-	UploadLimit string `yaml:"upload_limit"`
-	Interface   string `yaml:"interface"`
+	Enabled               bool   `yaml:"enabled"`
+	UploadLimit           string `yaml:"upload_limit"`
+	Interface             string `yaml:"interface"`
+	AllowReplaceRootQdisc bool   `yaml:"allow_replace_root_qdisc"`
 }
 
 type RuntimeConfig struct {

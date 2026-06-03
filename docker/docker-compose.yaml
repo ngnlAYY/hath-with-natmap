@@ -31,3 +31,5 @@ services:
       # 可选：设置为宿主机 hath 数据目录所有者的 UID/GID。
       PUID: "1000"
       PGID: "1000"
+      # 可选：如果宿主机 hath 数据目录权限已正确设置，可设为 "1" 跳过 /data/hath 递归 chown。
+      # SKIP_CHOWN: "1"

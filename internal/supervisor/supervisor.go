@@ -32,6 +32,7 @@ type Runtime struct {
 	Events          <-chan natmap.Mapping
 	BindPort        int
 	RetryDelay      time.Duration
+	RetryMaxDelay   time.Duration
 	RestartDelay    time.Duration
 	ShutdownTimeout time.Duration
 }
@@ -49,6 +50,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 
 	coordinator := &Coordinator{Hath: r.Hath, Updater: r.Updater, BindPort: r.BindPort}
+	currentRetryDelay := time.Duration(0)
 	for {
 		if ctx.Err() != nil {
 			r.stopAllWithTimeout()
@@ -57,13 +59,15 @@ func (r *Runtime) Run(ctx context.Context) error {
 
 		log.Printf("启动 natmap 进程")
 		if err := r.Natmap.Start(ctx); err != nil {
-			log.Printf("启动 natmap 失败，稍后重试: %v", err)
-			if !sleep(ctx, r.retryDelay()) {
+			currentRetryDelay = r.nextRetryDelay(currentRetryDelay)
+			log.Printf("启动 natmap 失败，%s 后重试: %v", currentRetryDelay, err)
+			if !sleep(ctx, currentRetryDelay) {
 				r.stopAllWithTimeout()
 				return nil
 			}
 			continue
 		}
+		currentRetryDelay = 0
 
 		if err := r.runUntilRestart(ctx, coordinator); err != nil {
 			log.Printf("运行期错误，准备自动恢复: %v", err)
@@ -162,6 +166,33 @@ func (r *Runtime) retryDelay() time.Duration {
 		return r.RetryDelay
 	}
 	return 5 * time.Second
+}
+
+func (r *Runtime) retryMaxDelay() time.Duration {
+	initial := r.retryDelay()
+	if r.RetryMaxDelay <= 0 || r.RetryMaxDelay < initial {
+		return initial
+	}
+	return r.RetryMaxDelay
+}
+
+func (r *Runtime) nextRetryDelay(current time.Duration) time.Duration {
+	initial := r.retryDelay()
+	maxDelay := r.retryMaxDelay()
+	if current <= 0 {
+		return initial
+	}
+	if current >= maxDelay {
+		return maxDelay
+	}
+	if current > maxDelay/2 {
+		return maxDelay
+	}
+	next := current * 2
+	if next > maxDelay {
+		return maxDelay
+	}
+	return next
 }
 
 func (r *Runtime) restartDelay() time.Duration {
