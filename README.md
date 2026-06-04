@@ -8,6 +8,7 @@
 - `natmap` 与 `hath-rust` 共享固定本地端口。
 - 公网映射未变化时不重复更新 Hentai@Home，也不重启正在运行的 `hath-rust`。
 - 首次获取映射或公网端口变化时自动更新 Hentai@Home 端口。
+- 可配置跳过访问 Hentai@Home 设置页更新公网端口。
 - 可选自动配置 Linux `tc` 上传限速。
 - 可选使用路由器 UPnP/IGD 添加固定 TCP 端口映射。
 - 镜像内置 `hath-natmap`、`natmap`、`hath-rust` 和 notify 脚本。

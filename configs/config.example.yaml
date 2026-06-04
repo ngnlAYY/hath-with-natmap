@@ -12,14 +12,16 @@ upnp:
 
 # e-hentai 账号 Cookie 与 Hentai@Home 客户端信息。
 ehentai:
-  # e-hentai Cookie 中的 ipb_member_id。
+  # e-hentai Cookie 中的 ipb_member_id；skip_port_update 为 true 时可留空。
   member_id: "123456"
-  # e-hentai Cookie 中的 ipb_pass_hash；不要提交真实值。
+  # e-hentai Cookie 中的 ipb_pass_hash；不要提交真实值，skip_port_update 为 true 时可留空。
   pass_hash: "example-pass-hash"
   # Hentai@Home client ID，用于更新端口并生成 client_login。
   client_id: "12345"
   # Hentai@Home client key，用于生成 hath-rust 的 client_login。
   client_key: "example-client-key"
+  # 是否跳过访问 E-Hentai 更新 Hentai@Home 公网端口；若你已手动固定端口，可设为 true。
+  skip_port_update: false
 
 # natmap 和 hath-rust 共享的网络配置。
 network:

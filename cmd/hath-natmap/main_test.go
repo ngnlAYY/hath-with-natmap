@@ -138,6 +138,42 @@ func (fakeRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("fake round tripper")
 }
 
+func TestBuildPortUpdaterSkipsEHentaiPortUpdate(t *testing.T) {
+	var logs bytes.Buffer
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+	}()
+
+	updater := buildPortUpdater(config.Config{EHentai: config.EHentaiConfig{SkipPortUpdate: true}}, ehentaiPanicUpdater{})
+	if err := updater.UpdatePort(context.Background(), 4567); err != nil {
+		t.Fatalf("UpdatePort() error = %v", err)
+	}
+	if !strings.Contains(logs.String(), "跳过更新 H@H 公网端口") {
+		t.Fatalf("log output = %q, want skip port update log", logs.String())
+	}
+}
+
+func TestBuildPortUpdaterSkippedUpdateRespectsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	updater := buildPortUpdater(config.Config{EHentai: config.EHentaiConfig{SkipPortUpdate: true}}, ehentaiPanicUpdater{})
+	if err := updater.UpdatePort(ctx, 4567); !errors.Is(err, context.Canceled) {
+		t.Fatalf("UpdatePort() error = %v, want context.Canceled", err)
+	}
+}
+
+type ehentaiPanicUpdater struct{}
+
+func (ehentaiPanicUpdater) UpdatePort(ctx context.Context, port int) error {
+	return errors.New("real updater called")
+}
+
 func TestBuildRuntimeWiresRetryMaxDelay(t *testing.T) {
 	cfg := config.Config{
 		Network: config.NetworkConfig{BindPort: 16000},

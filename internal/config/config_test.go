@@ -97,6 +97,42 @@ func TestLoadOldConfigWithoutExternalUpdateTimeoutStillLoads(t *testing.T) {
 	}
 }
 
+func TestLoadEHentaiSkipPortUpdate(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "  client_key: \"example-client-key\"\n", "  client_key: \"example-client-key\"\n  skip_port_update: true\n", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.EHentai.SkipPortUpdate {
+		t.Fatal("EHentai.SkipPortUpdate = false, want true")
+	}
+}
+
+func TestLoadSkipPortUpdateDoesNotRequireEHentaiCookie(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), `member_id: "123456"`, `member_id: ""`, 1)
+	cfgText = strings.Replace(cfgText, `pass_hash: "example-pass-hash"`, `pass_hash: ""`, 1)
+	cfgText = strings.Replace(cfgText, "  client_key: \"example-client-key\"\n", "  client_key: \"example-client-key\"\n  skip_port_update: true\n", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.EHentai.SkipPortUpdate {
+		t.Fatal("EHentai.SkipPortUpdate = false, want true")
+	}
+}
+
 func TestLoadBandwidthAllowReplaceRootQdisc(t *testing.T) {
 	dir := t.TempDir()
 	cfgText := strings.Replace(validConfigYAML(t, dir), "  interface: eth0\n", "  interface: eth0\n  allow_replace_root_qdisc: true\n", 1)

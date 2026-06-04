@@ -28,12 +28,14 @@ ehentai:
   pass_hash: "example-pass-hash"
   client_id: "12345"
   client_key: "example-client-key"
+  skip_port_update: false
 ```
 
 - `member_id`：e-hentai Cookie `ipb_member_id`。
 - `pass_hash`：e-hentai Cookie `ipb_pass_hash`。
 - `client_id`：Hentai@Home client ID。
 - `client_key`：Hentai@Home client key。
+- `skip_port_update`：是否跳过访问 E-Hentai 更新 Hentai@Home 公网端口；默认 `false`。设为 `true` 时仍会执行 `natmap` 或 UPnP 映射并启动 `hath-rust`，但不会访问 Hentai@Home 设置页修改端口，此时 `member_id` 和 `pass_hash` 可以留空。
 
 这些值用于登录 Hentai@Home 设置页和生成 `hath-rust` 的 `client_login` 文件。不要把真实配置提交到仓库。
 

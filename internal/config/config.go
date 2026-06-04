@@ -62,10 +62,11 @@ type Config struct {
 }
 
 type EHentaiConfig struct {
-	MemberID  string `yaml:"member_id"`
-	PassHash  string `yaml:"pass_hash"`
-	ClientID  string `yaml:"client_id"`
-	ClientKey string `yaml:"client_key"`
+	MemberID       string `yaml:"member_id"`
+	PassHash       string `yaml:"pass_hash"`
+	ClientID       string `yaml:"client_id"`
+	ClientKey      string `yaml:"client_key"`
+	SkipPortUpdate bool   `yaml:"skip_port_update"`
 }
 
 type NetworkConfig struct {
@@ -157,11 +158,13 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if err := requireString("ehentai.member_id", c.EHentai.MemberID); err != nil {
-		return err
-	}
-	if err := requireString("ehentai.pass_hash", c.EHentai.PassHash); err != nil {
-		return err
+	if !c.EHentai.SkipPortUpdate {
+		if err := requireString("ehentai.member_id", c.EHentai.MemberID); err != nil {
+			return err
+		}
+		if err := requireString("ehentai.pass_hash", c.EHentai.PassHash); err != nil {
+			return err
+		}
 	}
 	if err := requireString("ehentai.client_id", c.EHentai.ClientID); err != nil {
 		return err

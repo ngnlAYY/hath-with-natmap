@@ -82,12 +82,12 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	updater := ehentai.Client{
+	updater := buildPortUpdater(cfg, ehentai.Client{
 		HTTPClient: updaterHTTPClient,
 		MemberID:   cfg.EHentai.MemberID,
 		PassHash:   cfg.EHentai.PassHash,
 		ClientID:   cfg.EHentai.ClientID,
-	}
+	})
 
 	if cfg.Mapping.Mode == "upnp" {
 		runtime := buildRuntime(cfg, nil, nil, "")
@@ -123,6 +123,23 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("运行失败: %w", err)
 	}
 	return nil
+}
+
+type skipPortUpdater struct{}
+
+func (skipPortUpdater) UpdatePort(ctx context.Context, port int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	log.Printf("跳过更新 H@H 公网端口 %d", port)
+	return nil
+}
+
+func buildPortUpdater(cfg config.Config, updater supervisor.PortUpdater) supervisor.PortUpdater {
+	if cfg.EHentai.SkipPortUpdate {
+		return skipPortUpdater{}
+	}
+	return updater
 }
 
 func buildBandwidthLimiter(cfg config.Config) bandwidth.Limiter {
