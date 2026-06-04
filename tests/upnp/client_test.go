@@ -1,15 +1,11 @@
-package upnp
+package upnp_test
 
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/url"
+	upnp "github.com/ngnlAYY/hath-with-natter/internal/upnp"
 	"strings"
 	"testing"
-
-	"github.com/huin/goupnp"
-	"github.com/huin/goupnp/soap"
 )
 
 type fakeWANService struct {
@@ -168,12 +164,12 @@ func TestClientAddMappingAddsTCPPortMapping(t *testing.T) {
 		externalIP: "203.0.113.10",
 		localAddr:  "192.168.1.10",
 	}
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return service, nil
 		},
 	}
-	cfg := Config{
+	cfg := upnp.Config{
 		Port:          16000,
 		LeaseDuration: 3600,
 		Description:   "hath-with-natter",
@@ -230,13 +226,13 @@ func TestClientAddMappingContinuesWhenExternalIPFails(t *testing.T) {
 		externalErr: errors.New("external ip failed"),
 		localAddr:   "192.168.1.10",
 	}
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return service, nil
 		},
 	}
 
-	mapping, err := client.AddMapping(context.Background(), Config{Port: 16000})
+	mapping, err := client.AddMapping(context.Background(), upnp.Config{Port: 16000})
 	if err != nil {
 		t.Fatalf("AddMapping returned error: %v", err)
 	}
@@ -247,13 +243,13 @@ func TestClientAddMappingContinuesWhenExternalIPFails(t *testing.T) {
 
 func TestClientAddMappingReturnsDiscoverError(t *testing.T) {
 	wantErr := errors.New("discover failed")
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return nil, wantErr
 		},
 	}
 
-	_, err := client.AddMapping(context.Background(), Config{Port: 16000})
+	_, err := client.AddMapping(context.Background(), upnp.Config{Port: 16000})
 	if err == nil {
 		t.Fatal("AddMapping returned nil error, want error")
 	}
@@ -271,13 +267,13 @@ func TestClientAddMappingReturnsAddError(t *testing.T) {
 		addErr:    wantErr,
 		localAddr: "192.168.1.10",
 	}
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return service, nil
 		},
 	}
 
-	_, err := client.AddMapping(context.Background(), Config{Port: 16000})
+	_, err := client.AddMapping(context.Background(), upnp.Config{Port: 16000})
 	if err == nil {
 		t.Fatal("AddMapping returned nil error, want error")
 	}
@@ -294,14 +290,14 @@ func TestClientAddMappingPrefersContextAwareMethods(t *testing.T) {
 		externalIP: "203.0.113.10",
 		localAddr:  "192.168.1.10",
 	}
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return service, nil
 		},
 	}
 	ctx := context.WithValue(context.Background(), struct{}{}, "marker")
 
-	_, err := client.AddMapping(ctx, Config{Port: 16000})
+	_, err := client.AddMapping(ctx, upnp.Config{Port: 16000})
 	if err != nil {
 		t.Fatalf("AddMapping returned error: %v", err)
 	}
@@ -324,13 +320,13 @@ func TestClientAddMappingPrefersContextAwareMethods(t *testing.T) {
 
 func TestClientDeleteMappingDeletesTCPPortMapping(t *testing.T) {
 	service := &legacyWANService{localAddr: "192.168.1.10"}
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return service, nil
 		},
 	}
 
-	if err := client.DeleteMapping(context.Background(), Config{Port: 16000}); err != nil {
+	if err := client.DeleteMapping(context.Background(), upnp.Config{Port: 16000}); err != nil {
 		t.Fatalf("DeleteMapping returned error: %v", err)
 	}
 	if !service.deleteCalled {
@@ -349,14 +345,14 @@ func TestClientDeleteMappingDeletesTCPPortMapping(t *testing.T) {
 
 func TestClientDeleteMappingPrefersContextAwareMethod(t *testing.T) {
 	service := &fakeWANService{localAddr: "192.168.1.10"}
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return service, nil
 		},
 	}
 	ctx := context.WithValue(context.Background(), struct{}{}, "marker")
 
-	if err := client.DeleteMapping(ctx, Config{Port: 16000}); err != nil {
+	if err := client.DeleteMapping(ctx, upnp.Config{Port: 16000}); err != nil {
 		t.Fatalf("DeleteMapping returned error: %v", err)
 	}
 	if !service.deleteCtxCalled {
@@ -372,13 +368,13 @@ func TestClientDeleteMappingPrefersContextAwareMethod(t *testing.T) {
 
 func TestClientAddMappingRejectsUntrustedLocalAddress(t *testing.T) {
 	service := &fakeWANService{localAddr: "203.0.113.10"}
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return service, nil
 		},
 	}
 
-	_, err := client.AddMapping(context.Background(), Config{Port: 16000})
+	_, err := client.AddMapping(context.Background(), upnp.Config{Port: 16000})
 	if err == nil || !strings.Contains(err.Error(), "UPnP 本地地址不可信") {
 		t.Fatalf("AddMapping error = %v, want untrusted local address error", err)
 	}
@@ -392,13 +388,13 @@ func TestClientAddMappingRejectsUntrustedServiceHost(t *testing.T) {
 	for _, serviceHost := range tests {
 		t.Run(serviceHost, func(t *testing.T) {
 			service := &fakeWANService{localAddr: "192.168.1.10", serviceHost: serviceHost}
-			client := Client{
-				Discover: func(ctx context.Context) (WANService, error) {
+			client := upnp.Client{
+				Discover: func(ctx context.Context) (upnp.WANService, error) {
 					return service, nil
 				},
 			}
 
-			_, err := client.AddMapping(context.Background(), Config{Port: 16000})
+			_, err := client.AddMapping(context.Background(), upnp.Config{Port: 16000})
 			if err == nil || !strings.Contains(err.Error(), "UPnP 服务地址不可信") {
 				t.Fatalf("AddMapping error = %v, want untrusted service host error", err)
 			}
@@ -411,158 +407,17 @@ func TestClientAddMappingRejectsUntrustedServiceHost(t *testing.T) {
 
 func TestClientAddMappingAllowsIPv6LinkLocalServiceHost(t *testing.T) {
 	service := &fakeWANService{localAddr: "192.168.1.10", serviceHost: "[fe80::1%eth0]:80"}
-	client := Client{
-		Discover: func(ctx context.Context) (WANService, error) {
+	client := upnp.Client{
+		Discover: func(ctx context.Context) (upnp.WANService, error) {
 			return service, nil
 		},
 	}
 
-	_, err := client.AddMapping(context.Background(), Config{Port: 16000})
+	_, err := client.AddMapping(context.Background(), upnp.Config{Port: 16000})
 	if err != nil {
 		t.Fatalf("AddMapping returned error: %v", err)
 	}
 	if !service.addCtxCalled {
 		t.Fatal("AddPortMappingCtx was not called")
-	}
-}
-
-func TestIsTrustedLANHost(t *testing.T) {
-	tests := []struct {
-		name string
-		host string
-		want bool
-	}{
-		{name: "private ipv4", host: "192.168.1.10", want: true},
-		{name: "loopback", host: "127.0.0.1", want: true},
-		{name: "ipv6 ula", host: "fd00::1", want: true},
-		{name: "ipv6 link local with zone", host: "[fe80::1%eth0]:80", want: true},
-		{name: "public ipv4", host: "203.0.113.10", want: false},
-		{name: "public ipv6", host: "2001:db8::1", want: false},
-		{name: "hostname", host: "router.local", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isTrustedLANHost(tt.host); got != tt.want {
-				t.Fatalf("isTrustedLANHost(%q) = %v, want %v", tt.host, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestIsTrustedRemoteLANHost(t *testing.T) {
-	tests := []struct {
-		name string
-		host string
-		want bool
-	}{
-		{name: "private ipv4", host: "192.168.1.1", want: true},
-		{name: "ipv6 ula", host: "fd00::1", want: true},
-		{name: "loopback", host: "127.0.0.1", want: false},
-		{name: "link local", host: "169.254.169.254", want: false},
-		{name: "public ipv4", host: "203.0.113.10", want: false},
-		{name: "hostname", host: "router.local", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isTrustedRemoteLANHost(tt.host); got != tt.want {
-				t.Fatalf("isTrustedRemoteLANHost(%q) = %v, want %v", tt.host, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestClientHTTPClientDisablesProxyByDefault(t *testing.T) {
-	client := Client{}.httpClient()
-	transport, ok := client.Transport.(trustedLANTransport)
-	if !ok {
-		t.Fatalf("Transport = %T, want trustedLANTransport", client.Transport)
-	}
-	base, ok := transport.base.(*http.Transport)
-	if !ok {
-		t.Fatalf("base transport = %T, want *http.Transport", transport.base)
-	}
-	if base.Proxy != nil {
-		t.Fatal("Transport.Proxy != nil, want nil")
-	}
-	if client.Timeout != defaultHTTPClientTimeout {
-		t.Fatalf("Timeout = %s, want %s", client.Timeout, defaultHTTPClientTimeout)
-	}
-}
-
-func TestValidateTrustedLANURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		target  string
-		wantErr bool
-	}{
-		{name: "private ipv4", target: "http://192.168.1.1/root.xml", wantErr: false},
-		{name: "ipv6 ula", target: "http://[fd00::1]/root.xml", wantErr: false},
-		{name: "loopback", target: "http://127.0.0.1/root.xml", wantErr: true},
-		{name: "link local", target: "http://169.254.169.254/root.xml", wantErr: true},
-		{name: "public", target: "http://203.0.113.10/root.xml", wantErr: true},
-		{name: "hostname", target: "http://router.local/root.xml", wantErr: true},
-		{name: "unsupported scheme", target: "ftp://192.168.1.1/root.xml", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			target, err := url.Parse(tt.target)
-			if err != nil {
-				t.Fatalf("url.Parse returned error: %v", err)
-			}
-			err = validateTrustedLANURL(target)
-			if tt.wantErr && err == nil {
-				t.Fatalf("validateTrustedLANURL(%q) = nil, want error", tt.target)
-			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("validateTrustedLANURL(%q) = %v, want nil", tt.target, err)
-			}
-		})
-	}
-}
-
-func TestWithGoupnpHTTPClientOverridesAndRestoresDefault(t *testing.T) {
-	oldClient := goupnp.HTTPClientDefault
-	replacement := &http.Client{Transport: &http.Transport{Proxy: nil}}
-
-	got, err := withGoupnpHTTPClient(replacement, func() (*http.Client, error) {
-		return goupnp.HTTPClientDefault, nil
-	})
-	if err != nil {
-		t.Fatalf("withGoupnpHTTPClient returned error: %v", err)
-	}
-	if got != replacement {
-		t.Fatal("goupnp.HTTPClientDefault was not overridden inside callback")
-	}
-	if goupnp.HTTPClientDefault != oldClient {
-		t.Fatal("goupnp.HTTPClientDefault was not restored")
-	}
-}
-
-func TestWithSOAPHTTPClientOverridesAndRestoresClient(t *testing.T) {
-	endpoint, err := url.Parse("http://192.168.1.1/control")
-	if err != nil {
-		t.Fatalf("url.Parse returned error: %v", err)
-	}
-	serviceClient := &goupnp.ServiceClient{SOAPClient: &soap.SOAPClient{EndpointURL: *endpoint}}
-	replacement := &http.Client{Transport: &http.Transport{Proxy: nil}}
-
-	got, err := withSOAPHTTPClient(serviceClient, replacement, func() (*http.Transport, error) {
-		transport, ok := serviceClient.SOAPClient.HTTPClient.Transport.(*http.Transport)
-		if !ok {
-			t.Fatalf("SOAP HTTP transport = %T, want *http.Transport", serviceClient.SOAPClient.HTTPClient.Transport)
-		}
-		return transport, nil
-	})
-	if err != nil {
-		t.Fatalf("withSOAPHTTPClient returned error: %v", err)
-	}
-	if got.Proxy != nil {
-		t.Fatal("SOAP HTTP transport Proxy != nil, want nil")
-	}
-	if serviceClient.SOAPClient.HTTPClient.Transport != nil {
-		t.Fatal("SOAP HTTP client was not restored")
 	}
 }

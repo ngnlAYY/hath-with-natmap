@@ -2,9 +2,9 @@
 #
 # 使用方式（在仓库根目录执行）：
 #   cp configs/config.example.yaml config.yaml
-#   docker compose -f docker/docker-compose.build.yaml up -d --build
+#   docker compose -f deploy/docker/docker-compose.build.yaml up -d --build
 #
-# 如果已经有构建好的 hath:natmap-rust 镜像，请使用 docker/docker-compose.yaml。
+# 如果已经有构建好的 hath:natmap-rust 镜像，请使用 deploy/docker/docker-compose.yaml。
 
 name: natmap-rust
 
@@ -12,8 +12,8 @@ services:
   natmap-rust:
     image: hath:natmap-rust
     build:
-      context: ..
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
     container_name: natmap-rust
     network_mode: host
     restart: unless-stopped
@@ -24,15 +24,15 @@ services:
 
     volumes:
       # 主配置文件；请先从 configs/config.example.yaml 复制并填入真实账号信息。
-      - ../config.yaml:/config/config.yaml:ro
-      # hath-rust 数据目录；需要确保容器内 hath 用户有写入权限。
-      - ../hath:/data/hath
+      - ../../config.yaml:/config/config.yaml:ro
+      # hath-rust 数据目录；请在仓库根目录提前执行 chown -R 1000:1000 hath。
+      - ../../hath:/data/hath
+
+    tmpfs:
+      - /run/hath-natmap:uid=1000,gid=1000,mode=700
+
+    user: "1000:1000"
 
     environment:
       # 容器时区；可按需要改为其它 IANA 时区名称。
       TZ: Asia/Shanghai
-      # 可选：设置为宿主机 hath 数据目录所有者的 UID/GID。
-      PUID: "1000"
-      PGID: "1000"
-      # 可选：如果宿主机 hath 数据目录权限已正确设置，可设为 "1" 跳过 /data/hath 递归 chown。
-      # SKIP_CHOWN: "1"

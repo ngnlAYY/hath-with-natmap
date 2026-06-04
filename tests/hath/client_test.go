@@ -1,7 +1,8 @@
-package hath
+package hath_test
 
 import (
 	"context"
+	hath "github.com/ngnlAYY/hath-with-natter/internal/hath"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestBuildArgs(t *testing.T) {
-	cfg := Config{
+	cfg := hath.Config{
 		BinaryPath:          "/usr/local/bin/hath-rust",
 		DataDir:             "/data/hath",
 		LogLevel:            "warn",
@@ -41,7 +42,7 @@ func TestBuildArgs(t *testing.T) {
 }
 
 func TestArgsOmitsOptionalFlagsWhenDisabled(t *testing.T) {
-	cfg := Config{
+	cfg := hath.Config{
 		DataDir:  "/data/hath",
 		LogLevel: "unknown",
 		ProxyURL: "http://127.0.0.1:8080",
@@ -61,7 +62,7 @@ func TestArgsOmitsOptionalFlagsWhenDisabled(t *testing.T) {
 }
 
 func TestArgsOmitsProxyWhenProxyURLEmpty(t *testing.T) {
-	cfg := Config{
+	cfg := hath.Config{
 		DataDir:  "/data/hath",
 		UseProxy: true,
 		ProxyURL: "",
@@ -82,7 +83,7 @@ func TestArgsOmitsProxyWhenProxyURLEmpty(t *testing.T) {
 }
 
 func TestArgsAppendsWhitelistedFlagsAfterExistingOptions(t *testing.T) {
-	cfg := Config{
+	cfg := hath.Config{
 		DataDir:              "/data/hath",
 		LogLevel:             "warn",
 		ForceBackgroundScan:  true,
@@ -125,7 +126,7 @@ func TestArgsAppendsWhitelistedFlagsAfterExistingOptions(t *testing.T) {
 }
 
 func TestArgsOmitsMaxConnectionWhenZero(t *testing.T) {
-	cfg := Config{
+	cfg := hath.Config{
 		DataDir:       "/data/hath",
 		FlushLog:      true,
 		MaxConnection: 0,
@@ -161,7 +162,7 @@ func TestArgsQuietFlagMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := Config{DataDir: "/data/hath", LogLevel: tt.logLevel}
+			cfg := hath.Config{DataDir: "/data/hath", LogLevel: tt.logLevel}
 			got := cfg.Args(1)
 			quietFlags := quietFlagsFromArgs(got)
 			if !reflect.DeepEqual(quietFlags, tt.want) {
@@ -173,7 +174,7 @@ func TestArgsQuietFlagMapping(t *testing.T) {
 
 func TestWriteClientLogin(t *testing.T) {
 	dir := t.TempDir()
-	cfg := Config{DataDir: dir, ClientID: "12345", ClientKey: "secret"}
+	cfg := hath.Config{DataDir: dir, ClientID: "12345", ClientKey: "secret"}
 	if err := cfg.WriteClientLogin(); err != nil {
 		t.Fatalf("WriteClientLogin() error = %v", err)
 	}
@@ -203,14 +204,14 @@ func TestWriteClientLogin(t *testing.T) {
 }
 
 func TestWriteClientLoginRejectsEmptyClientID(t *testing.T) {
-	cfg := Config{DataDir: t.TempDir(), ClientKey: "secret"}
+	cfg := hath.Config{DataDir: t.TempDir(), ClientKey: "secret"}
 	if err := cfg.WriteClientLogin(); err == nil || !strings.Contains(err.Error(), "ClientID 不能为空") {
 		t.Fatalf("WriteClientLogin() error = %v, want ClientID 不能为空", err)
 	}
 }
 
 func TestWriteClientLoginRejectsEmptyClientKey(t *testing.T) {
-	cfg := Config{DataDir: t.TempDir(), ClientID: "12345"}
+	cfg := hath.Config{DataDir: t.TempDir(), ClientID: "12345"}
 	if err := cfg.WriteClientLogin(); err == nil || !strings.Contains(err.Error(), "ClientKey 不能为空") {
 		t.Fatalf("WriteClientLogin() error = %v, want ClientKey 不能为空", err)
 	}
@@ -259,14 +260,14 @@ func TestControllerStartWritesLoginAndStartsWithPrivatePort(t *testing.T) {
 	dir := t.TempDir()
 	proc := newFakeProcess()
 	runner := &fakeProcessRunner{proc: proc}
-	cfg := Config{
+	cfg := hath.Config{
 		BinaryPath: "/usr/local/bin/hath-rust",
 		DataDir:    dir,
 		LogLevel:   "info",
 		ClientID:   "12345",
 		ClientKey:  "secret",
 	}
-	controller := &Controller{Config: cfg, Runner: runner}
+	controller := &hath.Controller{Config: cfg, Runner: runner}
 
 	if err := controller.Start(context.Background(), 16000); err != nil {
 		t.Fatalf("Start returned error: %v", err)
@@ -298,22 +299,23 @@ func TestControllerStartWritesLoginAndStartsWithPrivatePort(t *testing.T) {
 }
 
 func TestControllerRunningClearsExitedProcess(t *testing.T) {
-	proc := newFakeProcess()
-	controller := &Controller{proc: proc}
+	controller, proc := startController(t)
 	proc.done <- nil
 	close(proc.done)
 
 	if controller.Running() {
 		t.Fatal("Running = true after process Done, want false")
 	}
-	if controller.proc != nil {
-		t.Fatal("controller proc was not cleared after Done")
+	if err := controller.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
+	}
+	if proc.stops != 0 {
+		t.Fatalf("process stops = %d after Running() cleared exited process, want 0", proc.stops)
 	}
 }
 
 func TestControllerStopStopsProcessAndClearsIt(t *testing.T) {
-	proc := newFakeProcess()
-	controller := &Controller{proc: proc}
+	controller, proc := startController(t)
 
 	if err := controller.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop returned error: %v", err)
@@ -321,13 +323,19 @@ func TestControllerStopStopsProcessAndClearsIt(t *testing.T) {
 	if proc.stops != 1 {
 		t.Fatalf("process stops = %d, want 1", proc.stops)
 	}
-	if controller.proc != nil {
-		t.Fatal("controller proc was not cleared after Stop")
+	if controller.Running() {
+		t.Fatal("Running = true after Stop, want false")
+	}
+	if err := controller.Stop(context.Background()); err != nil {
+		t.Fatalf("second Stop returned error: %v", err)
+	}
+	if proc.stops != 1 {
+		t.Fatalf("process stops after second Stop = %d, want 1", proc.stops)
 	}
 }
 
 func TestControllerStopNoOpsWhenNotStarted(t *testing.T) {
-	controller := &Controller{}
+	controller := &hath.Controller{}
 
 	if err := controller.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop returned error: %v", err)
@@ -335,7 +343,7 @@ func TestControllerStopNoOpsWhenNotStarted(t *testing.T) {
 }
 
 func TestControllerLifecycleMethodsAreRaceSafe(t *testing.T) {
-	controller := &Controller{proc: newFakeProcess()}
+	controller, _ := startController(t)
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Add(2)
@@ -349,6 +357,27 @@ func TestControllerLifecycleMethodsAreRaceSafe(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func startController(t *testing.T) (*hath.Controller, *fakeProcess) {
+	t.Helper()
+
+	dir := t.TempDir()
+	proc := newFakeProcess()
+	runner := &fakeProcessRunner{proc: proc}
+	controller := &hath.Controller{
+		Config: hath.Config{
+			BinaryPath: "/usr/local/bin/hath-rust",
+			DataDir:    dir,
+			ClientID:   "12345",
+			ClientKey:  "secret",
+		},
+		Runner: runner,
+	}
+	if err := controller.Start(context.Background(), 16000); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	return controller, proc
 }
 
 func quietFlagsFromArgs(args []string) []string {

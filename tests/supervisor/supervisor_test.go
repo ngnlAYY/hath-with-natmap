@@ -1,8 +1,9 @@
-package supervisor
+package supervisor_test
 
 import (
 	"context"
 	"errors"
+	supervisor "github.com/ngnlAYY/hath-with-natter/internal/supervisor"
 	"strings"
 	"sync"
 	"testing"
@@ -182,7 +183,7 @@ func TestRuntimeRunHandlesMappingThroughCoordinator(t *testing.T) {
 	natmapProc := newFakeNatmapProcess()
 	hath := &fakeHath{}
 	updater := &fakeUpdater{}
-	runtime := Runtime{
+	runtime := supervisor.Runtime{
 		Natmap:     natmapProc,
 		Hath:       hath,
 		Updater:    updater,
@@ -217,7 +218,7 @@ func TestRuntimeRunRetriesNatmapStartFailureUntilContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	natmapProc := newFakeNatmapProcess()
 	natmapProc.err = errors.New("start failed")
-	runtime := Runtime{
+	runtime := supervisor.Runtime{
 		Natmap:        natmapProc,
 		Hath:          &fakeHath{},
 		Updater:       &fakeUpdater{},
@@ -238,51 +239,12 @@ func TestRuntimeRunRetriesNatmapStartFailureUntilContextCancel(t *testing.T) {
 	}
 }
 
-func TestRuntimeNextRetryDelayDoublesUntilMax(t *testing.T) {
-	runtime := Runtime{RetryDelay: 5 * time.Millisecond, RetryMaxDelay: 20 * time.Millisecond}
-
-	if got := runtime.nextRetryDelay(0); got != 5*time.Millisecond {
-		t.Fatalf("nextRetryDelay(0) = %s, want %s", got, 5*time.Millisecond)
-	}
-	if got := runtime.nextRetryDelay(5 * time.Millisecond); got != 10*time.Millisecond {
-		t.Fatalf("nextRetryDelay(initial) = %s, want %s", got, 10*time.Millisecond)
-	}
-	if got := runtime.nextRetryDelay(10 * time.Millisecond); got != 20*time.Millisecond {
-		t.Fatalf("nextRetryDelay(double) = %s, want %s", got, 20*time.Millisecond)
-	}
-	if got := runtime.nextRetryDelay(20 * time.Millisecond); got != 20*time.Millisecond {
-		t.Fatalf("nextRetryDelay(max) = %s, want %s", got, 20*time.Millisecond)
-	}
-}
-
-func TestRuntimeNextRetryDelayUsesInitialWhenMaxIsUnsetOrSmaller(t *testing.T) {
-	tests := []struct {
-		name          string
-		retryDelay    time.Duration
-		retryMaxDelay time.Duration
-		current       time.Duration
-		want          time.Duration
-	}{
-		{name: "max unset keeps fixed delay", retryDelay: 5 * time.Millisecond, current: 5 * time.Millisecond, want: 5 * time.Millisecond},
-		{name: "max smaller than initial uses initial", retryDelay: 20 * time.Millisecond, retryMaxDelay: 10 * time.Millisecond, current: 20 * time.Millisecond, want: 20 * time.Millisecond},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			runtime := Runtime{RetryDelay: tt.retryDelay, RetryMaxDelay: tt.retryMaxDelay}
-			if got := runtime.nextRetryDelay(tt.current); got != tt.want {
-				t.Fatalf("nextRetryDelay(%s) = %s, want %s", tt.current, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestRuntimeRunResetsRetryDelayAfterSuccessfulStart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	natmapProc := newFakeNatmapProcess()
 	natmapProc.startErrs = []error{errors.New("start failed"), nil, errors.New("start failed"), nil}
-	runtime := Runtime{
+	runtime := supervisor.Runtime{
 		Natmap:        natmapProc,
 		Hath:          &fakeHath{},
 		Updater:       &fakeUpdater{},
@@ -320,7 +282,7 @@ func TestRuntimeRunUsesRestartDelayAfterNatmapExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	natmapProc := newFakeNatmapProcess()
-	runtime := Runtime{
+	runtime := supervisor.Runtime{
 		Natmap:       natmapProc,
 		Hath:         &fakeHath{},
 		Updater:      &fakeUpdater{},
@@ -352,7 +314,7 @@ func TestRuntimeRunUsesShutdownTimeoutWhenContextCancels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	natmapProc := newFakeNatmapProcess()
 	hath := &fakeHath{running: true}
-	runtime := Runtime{
+	runtime := supervisor.Runtime{
 		Natmap:          natmapProc,
 		Hath:            hath,
 		Updater:         &fakeUpdater{},
@@ -383,7 +345,7 @@ func TestRuntimeRunStopsProcessesOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	natmapProc := newFakeNatmapProcess()
 	hath := &fakeHath{running: true}
-	runtime := Runtime{
+	runtime := supervisor.Runtime{
 		Natmap:     natmapProc,
 		Hath:       hath,
 		Updater:    &fakeUpdater{},
@@ -412,15 +374,15 @@ func TestRuntimeRunStopsProcessesOnContextCancel(t *testing.T) {
 func TestRuntimeRunRejectsNilDependencies(t *testing.T) {
 	tests := []struct {
 		name    string
-		runtime *Runtime
+		runtime *supervisor.Runtime
 		want    string
 	}{
 		{name: "nil runtime", runtime: nil, want: "runtime 未初始化"},
-		{name: "nil natmap", runtime: &Runtime{Hath: &fakeHath{}, Updater: &fakeUpdater{}, Events: make(chan natmap.Mapping), BindPort: 7000}, want: "natmap 进程未配置"},
-		{name: "nil hath", runtime: &Runtime{Natmap: newFakeNatmapProcess(), Updater: &fakeUpdater{}, Events: make(chan natmap.Mapping), BindPort: 7000}, want: "hath 控制器未配置"},
-		{name: "nil updater", runtime: &Runtime{Natmap: newFakeNatmapProcess(), Hath: &fakeHath{}, Events: make(chan natmap.Mapping), BindPort: 7000}, want: "端口更新器未配置"},
-		{name: "nil events", runtime: &Runtime{Natmap: newFakeNatmapProcess(), Hath: &fakeHath{}, Updater: &fakeUpdater{}, BindPort: 7000}, want: "natmap 事件通道未配置"},
-		{name: "missing bind port", runtime: &Runtime{Natmap: newFakeNatmapProcess(), Hath: &fakeHath{}, Updater: &fakeUpdater{}, Events: make(chan natmap.Mapping)}, want: "本地固定端口未配置"},
+		{name: "nil natmap", runtime: &supervisor.Runtime{Hath: &fakeHath{}, Updater: &fakeUpdater{}, Events: make(chan natmap.Mapping), BindPort: 7000}, want: "natmap 进程未配置"},
+		{name: "nil hath", runtime: &supervisor.Runtime{Natmap: newFakeNatmapProcess(), Updater: &fakeUpdater{}, Events: make(chan natmap.Mapping), BindPort: 7000}, want: "hath 控制器未配置"},
+		{name: "nil updater", runtime: &supervisor.Runtime{Natmap: newFakeNatmapProcess(), Hath: &fakeHath{}, Events: make(chan natmap.Mapping), BindPort: 7000}, want: "端口更新器未配置"},
+		{name: "nil events", runtime: &supervisor.Runtime{Natmap: newFakeNatmapProcess(), Hath: &fakeHath{}, Updater: &fakeUpdater{}, BindPort: 7000}, want: "natmap 事件通道未配置"},
+		{name: "missing bind port", runtime: &supervisor.Runtime{Natmap: newFakeNatmapProcess(), Hath: &fakeHath{}, Updater: &fakeUpdater{}, Events: make(chan natmap.Mapping)}, want: "本地固定端口未配置"},
 	}
 
 	for _, tt := range tests {
@@ -434,19 +396,19 @@ func TestRuntimeRunRejectsNilDependencies(t *testing.T) {
 }
 
 func TestHandleMappingNilCoordinatorReturnsErrorWithoutPanic(t *testing.T) {
-	var coordinator *Coordinator
+	var coordinator *supervisor.Coordinator
 
 	assertHandleMappingError(t, coordinator, "supervisor 协调器未初始化")
 }
 
 func TestHandleMappingNilHathReturnsErrorWithoutPanic(t *testing.T) {
-	coordinator := &Coordinator{Updater: &fakeUpdater{}}
+	coordinator := &supervisor.Coordinator{Updater: &fakeUpdater{}}
 
 	assertHandleMappingError(t, coordinator, "hath 控制器未配置")
 }
 
 func TestHandleMappingNilUpdaterReturnsErrorWithoutPanic(t *testing.T) {
-	coordinator := &Coordinator{Hath: &fakeHath{}}
+	coordinator := &supervisor.Coordinator{Hath: &fakeHath{}}
 
 	assertHandleMappingError(t, coordinator, "端口更新器未配置")
 }
@@ -456,7 +418,7 @@ func TestHandleMappingFirstMappingUpdatesPublicPortAndStartsWithBindPort(t *test
 	mapping := testMapping("203.0.113.10", 50000, 7000)
 	hath := &fakeHath{}
 	updater := &fakeUpdater{}
-	coordinator := &Coordinator{Hath: hath, Updater: updater, BindPort: 7000}
+	coordinator := &supervisor.Coordinator{Hath: hath, Updater: updater, BindPort: 7000}
 
 	if err := coordinator.HandleMapping(ctx, mapping); err != nil {
 		t.Fatalf("HandleMapping returned error: %v", err)
@@ -477,7 +439,7 @@ func TestHandleMappingRejectsMismatchedPrivatePort(t *testing.T) {
 	mapping := testMapping("203.0.113.10", 50000, 7100)
 	hath := &fakeHath{}
 	updater := &fakeUpdater{}
-	coordinator := &Coordinator{Hath: hath, Updater: updater, BindPort: 7000}
+	coordinator := &supervisor.Coordinator{Hath: hath, Updater: updater, BindPort: 7000}
 
 	err := coordinator.HandleMapping(ctx, mapping)
 	if err == nil || !strings.Contains(err.Error(), "natmap 本地端口") {
@@ -493,7 +455,7 @@ func TestHandleMappingSameMappingWhileRunningDoesNothing(t *testing.T) {
 	mapping := testMapping("203.0.113.10", 50000, 7000)
 	hath := &fakeHath{running: true}
 	updater := &fakeUpdater{}
-	coordinator := &Coordinator{Hath: hath, Updater: updater, CurrentMapping: mapping, BindPort: 7000}
+	coordinator := &supervisor.Coordinator{Hath: hath, Updater: updater, CurrentMapping: mapping, BindPort: 7000}
 
 	if err := coordinator.HandleMapping(ctx, mapping); err != nil {
 		t.Fatalf("HandleMapping returned error: %v", err)
@@ -513,7 +475,7 @@ func TestHandleMappingChangedMappingStopsUpdatesThenStarts(t *testing.T) {
 	events := []string{}
 	hath := &fakeHath{running: true, events: &events}
 	updater := &fakeUpdater{events: &events}
-	coordinator := &Coordinator{Hath: hath, Updater: updater, CurrentMapping: oldMapping, BindPort: 7000}
+	coordinator := &supervisor.Coordinator{Hath: hath, Updater: updater, CurrentMapping: oldMapping, BindPort: 7000}
 
 	if err := coordinator.HandleMapping(ctx, newMapping); err != nil {
 		t.Fatalf("HandleMapping returned error: %v", err)
@@ -535,7 +497,7 @@ func TestHandleMappingSameMappingWhileStoppedStartsWithoutUpdate(t *testing.T) {
 	mapping := testMapping("203.0.113.10", 50000, 7000)
 	hath := &fakeHath{running: false}
 	updater := &fakeUpdater{}
-	coordinator := &Coordinator{Hath: hath, Updater: updater, CurrentMapping: mapping, BindPort: 7000}
+	coordinator := &supervisor.Coordinator{Hath: hath, Updater: updater, CurrentMapping: mapping, BindPort: 7000}
 
 	if err := coordinator.HandleMapping(ctx, mapping); err != nil {
 		t.Fatalf("HandleMapping returned error: %v", err)
@@ -555,7 +517,7 @@ func TestHandleMappingStopFailureReturnsContextErrorAndStopsWorkflow(t *testing.
 	stopErr := errors.New("stop failed")
 	hath := &fakeHath{running: true, errStop: stopErr}
 	updater := &fakeUpdater{}
-	coordinator := &Coordinator{Hath: hath, Updater: updater, CurrentMapping: oldMapping, BindPort: 7000}
+	coordinator := &supervisor.Coordinator{Hath: hath, Updater: updater, CurrentMapping: oldMapping, BindPort: 7000}
 
 	err := coordinator.HandleMapping(ctx, newMapping)
 
@@ -574,7 +536,7 @@ func TestHandleMappingUpdateFailureReturnsContextErrorAndStopsWorkflow(t *testin
 	updateErr := errors.New("update failed")
 	hath := &fakeHath{running: false}
 	updater := &fakeUpdater{errUpdate: updateErr}
-	coordinator := &Coordinator{Hath: hath, Updater: updater, CurrentMapping: oldMapping, BindPort: 7000}
+	coordinator := &supervisor.Coordinator{Hath: hath, Updater: updater, CurrentMapping: oldMapping, BindPort: 7000}
 
 	err := coordinator.HandleMapping(ctx, newMapping)
 
@@ -592,7 +554,7 @@ func TestHandleMappingStartFailureReturnsContextError(t *testing.T) {
 	startErr := errors.New("start failed")
 	hath := &fakeHath{running: false, errStart: startErr}
 	updater := &fakeUpdater{}
-	coordinator := &Coordinator{Hath: hath, Updater: updater, CurrentMapping: oldMapping, BindPort: 7000}
+	coordinator := &supervisor.Coordinator{Hath: hath, Updater: updater, CurrentMapping: oldMapping, BindPort: 7000}
 
 	err := coordinator.HandleMapping(ctx, newMapping)
 
@@ -614,7 +576,7 @@ func testMapping(publicAddress string, publicPort int, privatePort int) natmap.M
 	}
 }
 
-func assertHandleMappingError(t *testing.T, coordinator *Coordinator, message string) {
+func assertHandleMappingError(t *testing.T, coordinator *supervisor.Coordinator, message string) {
 	t.Helper()
 
 	defer func() {

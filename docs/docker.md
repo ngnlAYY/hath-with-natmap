@@ -7,25 +7,28 @@
 本地构建当前架构镜像：
 
 ```bash
-docker build -f docker/Dockerfile -t hath:natmap-rust .
+docker build -f deploy/docker/Dockerfile -t hath:natmap-rust .
 ```
 
 构建指定平台：
 
 ```bash
-docker build -f docker/Dockerfile --platform linux/amd64 -t hath:natmap-rust .
+docker build -f deploy/docker/Dockerfile --platform linux/amd64 -t hath:natmap-rust .
 ```
 
-`docker/Dockerfile` 会在构建期下载固定版本的 `natmap` 与 `hath-rust` release 二进制，并用 `docker/checksums.txt` 校验 SHA256。
+`deploy/docker/Dockerfile` 会在构建期下载固定版本的 `natmap` 与 `hath-rust` release 二进制，并用 `deploy/docker/checksums.txt` 校验 SHA256。
 
 ## 运行
 
 ```bash
+mkdir -p hath
+chown -R 1000:1000 hath
+
 docker run --rm \
   --name natmap-rust \
   --net host \
-  -e PUID="$(id -u)" \
-  -e PGID="$(id -g)" \
+  --user 1000:1000 \
+  --tmpfs /run/hath-natmap:uid=1000,gid=1000,mode=700 \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
   hath:natmap-rust
@@ -35,10 +38,10 @@ docker run --rm \
 
 ```bash
 # 使用已有的 hath:natmap-rust 镜像
-docker compose -f docker/docker-compose.yaml up -d
+docker compose -f deploy/docker/docker-compose.yaml up -d
 
 # 或从本地源码构建镜像后运行
-docker compose -f docker/docker-compose.build.yaml up -d --build
+docker compose -f deploy/docker/docker-compose.build.yaml up -d --build
 ```
 
 `mapping.mode: upnp` 本身不需要 `NET_ADMIN`；只有启用了 `bandwidth.enabled` 时，才需要额外添加 `NET_ADMIN` capability：
@@ -48,8 +51,8 @@ docker run --rm \
   --name natmap-rust \
   --net host \
   --cap-add NET_ADMIN \
-  -e PUID="$(id -u)" \
-  -e PGID="$(id -g)" \
+  --user 1000:1000 \
+  --tmpfs /run/hath-natmap:uid=1000,gid=1000,mode=700 \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
   hath:natmap-rust
@@ -61,24 +64,17 @@ docker run --rm \
 - `--cap-add NET_ADMIN`：仅在启用 `bandwidth.enabled` 时需要；UPnP 映射本身不依赖这个 capability。
 - `/config/config.yaml`：只读挂载配置文件。
 - `/data/hath`：持久化 `hath-rust` 数据。
+- `--user 1000:1000`：直接以镜像内固定的非 root `hath` 用户运行主进程。
+- `--tmpfs /run/hath-natmap:uid=1000,gid=1000,mode=700`：为 natmap notify socket 提供仅当前运行用户可写的运行时目录。
 
-镜像默认以非 root 用户 `hath` 运行。若挂载宿主机目录到 `/data/hath`，推荐通过 `PUID` 和 `PGID` 指定容器内 `hath` 用户的运行 UID/GID，使其匹配宿主机数据目录所有者：
-
-```yaml
-environment:
-  PUID: "1000"
-  PGID: "1000"
-  # 可选：宿主机 hath 数据目录权限已正确设置时，跳过 /data/hath 递归 chown。
-  # SKIP_CHOWN: "1"
-```
-
-也可以直接使用当前宿主机用户：
+镜像不会在启动时递归修改宿主机挂载目录权限。首次运行前请在宿主机上创建数据目录，并确保 UID/GID `1000:1000` 可写：
 
 ```bash
--e PUID="$(id -u)" -e PGID="$(id -g)"
+mkdir -p hath
+chown -R 1000:1000 hath
 ```
 
-未设置 `PUID`/`PGID` 时，镜像使用内置的 `hath` 用户和组。`PUID`/`PGID` 必须是非 0 数字。容器启动时会检查 `/data/hath` 和 `/run/hath-natmap` 的属主；只有属主不匹配时才会在当前文件系统内修正权限，且不会跟随符号链接。若设置 `SKIP_CHOWN=1`，启动脚本会跳过 `/data/hath` 的递归 chown；请先确认宿主机挂载目录已经允许目标 UID/GID 写入。`/run/hath-natmap` 是容器内运行时目录，仍会在启动时修正属主以保证 notify socket 可写。若通过 `HATH_NATMAP_NOTIFY_SOCKET` 自定义 notify socket 路径，建议将父目录设置为当前运行用户独占，避免其他本地用户删除或占用 socket 文件。
+如果需要使用其它宿主机 UID/GID，请同时调整 `--user`、`--tmpfs` 的 `uid/gid`，并将数据目录属主改为同一 UID/GID。若通过 `HATH_NATMAP_NOTIFY_SOCKET` 自定义 notify socket 路径，建议将父目录设置为当前运行用户独占，避免其他本地用户删除或占用 socket 文件。
 
 ## 支持平台
 

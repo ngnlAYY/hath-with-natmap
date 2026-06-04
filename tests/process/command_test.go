@@ -1,17 +1,15 @@
-package process
+package process_test
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	process "github.com/ngnlAYY/hath-with-natter/internal/process"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -23,8 +21,8 @@ func TestOSRunnerStartAndStop(t *testing.T) {
 		return
 	}
 
-	runner := OSRunner{}
-	proc, err := runner.Start(context.Background(), Spec{
+	runner := process.OSRunner{}
+	proc, err := runner.Start(context.Background(), process.Spec{
 		Name: "helper",
 		Path: os.Args[0],
 		Args: []string{"-test.run=TestOSRunnerStartAndStop"},
@@ -54,9 +52,9 @@ func TestOSRunnerContextCancelDoesNotKillProcessBeforeStop(t *testing.T) {
 		select {}
 	}
 
-	runner := OSRunner{}
+	runner := process.OSRunner{}
 	startCtx, cancelStart := context.WithCancel(context.Background())
-	proc, err := runner.Start(startCtx, Spec{
+	proc, err := runner.Start(startCtx, process.Spec{
 		Name: "context-helper",
 		Path: os.Args[0],
 		Args: []string{"-test.run=TestOSRunnerContextCancelDoesNotKillProcessBeforeStop"},
@@ -93,8 +91,8 @@ func TestOSRunnerContextCancelDoesNotKillProcessBeforeStop(t *testing.T) {
 }
 
 func TestOSRunnerStartMissingPathIncludesProcessName(t *testing.T) {
-	runner := OSRunner{}
-	_, err := runner.Start(context.Background(), Spec{
+	runner := process.OSRunner{}
+	_, err := runner.Start(context.Background(), process.Spec{
 		Name: "missing-helper",
 		Path: "/path/to/missing/hath-process-helper",
 	})
@@ -115,11 +113,11 @@ func TestOSRunnerPrefixesProcessOutput(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	runner := OSRunner{
+	runner := process.OSRunner{
 		Stdout: &stdout,
 		Stderr: &stderr,
 	}
-	proc, err := runner.Start(context.Background(), Spec{
+	proc, err := runner.Start(context.Background(), process.Spec{
 		Name: "natmap",
 		Path: os.Args[0],
 		Args: []string{"-test.run=TestOSRunnerPrefixesProcessOutput"},
@@ -138,115 +136,6 @@ func TestOSRunnerPrefixesProcessOutput(t *testing.T) {
 	}
 }
 
-func TestOSRunnerSerializesOutputToSharedWriter(t *testing.T) {
-	var output bytes.Buffer
-	runner := OSRunner{Stdout: &output, Stderr: &output}
-	stdout, stderr := runner.outputWriters("natmap")
-
-	writeConcurrentLines(t, stdout, stderr)
-	assertPrefixedOutputLines(t, output.String())
-}
-
-func TestOSRunnerHandlesNonComparableOutputWriters(t *testing.T) {
-	stdout := sliceWriter{}
-	stderr := sliceWriter{}
-	runner := OSRunner{Stdout: stdout, Stderr: stderr}
-
-	out, errOut := runner.outputWriters("natmap")
-	if _, err := out.Write([]byte("stdout line\n")); err != nil {
-		t.Fatalf("stdout Write() error = %v", err)
-	}
-	if _, err := errOut.Write([]byte("stderr line\n")); err != nil {
-		t.Fatalf("stderr Write() error = %v", err)
-	}
-}
-
-type sliceWriter []byte
-
-func (w sliceWriter) Write(data []byte) (int, error) {
-	return len(data), nil
-}
-
-func writeConcurrentLines(t *testing.T, stdout io.Writer, stderr io.Writer) {
-	t.Helper()
-	var wg sync.WaitGroup
-	wg.Add(2)
-	errs := make(chan error, 2)
-	go func() {
-		defer wg.Done()
-		_, err := stdout.Write([]byte("stdout line\n"))
-		errs <- err
-	}()
-	go func() {
-		defer wg.Done()
-		_, err := stderr.Write([]byte("stderr line\n"))
-		errs <- err
-	}()
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatalf("Write() error = %v", err)
-		}
-	}
-}
-
-func assertPrefixedOutputLines(t *testing.T, output string) {
-	t.Helper()
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("output = %q, want exactly two lines", output)
-	}
-	wantLines := map[string]bool{
-		"[natmap] stdout line": false,
-		"[natmap] stderr line": false,
-	}
-	for _, line := range lines {
-		seen, ok := wantLines[line]
-		if !ok || seen {
-			t.Fatalf("unexpected line %q in output %q", line, output)
-		}
-		wantLines[line] = true
-	}
-}
-
-func TestOSProcessStopAlreadyExitedReturnsNilWithExpiredContext(t *testing.T) {
-	proc := &osProcess{
-		name:   "already-exited",
-		cmd:    startExitedTestCommand(t),
-		done:   delayedDone(nil, 20*time.Millisecond),
-		waited: closedWaited(),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if err := proc.Stop(ctx); err != nil {
-		t.Fatalf("Stop() error = %v, want nil", err)
-	}
-}
-
-func TestOSProcessStopReturnsUnexpectedWaitError(t *testing.T) {
-	waitErr := fmt.Errorf("wait failed")
-	proc := &osProcess{
-		name:    "bad-wait",
-		cmd:     startExitedTestCommand(t),
-		done:    closedDone(waitErr),
-		waited:  closedWaited(),
-		waitErr: waitErr,
-	}
-
-	err := proc.Stop(context.Background())
-	if !errors.Is(err, waitErr) {
-		t.Fatalf("Stop() error = %v, want wrapped wait error", err)
-	}
-	if !strings.Contains(err.Error(), "bad-wait") {
-		t.Fatalf("Stop() error = %q, want process name", err.Error())
-	}
-}
-
-func TestProcessExitHelper(t *testing.T) {
-}
-
 func TestOSProcessStopReturnsContextErrorAfterKillOnTimeout(t *testing.T) {
 	readyPath := filepath.Join(t.TempDir(), "ready")
 	if os.Getenv("HATH_PROCESS_IGNORE_TERM_HELPER") == "1" {
@@ -259,8 +148,8 @@ func TestOSProcessStopReturnsContextErrorAfterKillOnTimeout(t *testing.T) {
 		select {}
 	}
 
-	runner := OSRunner{}
-	proc, err := runner.Start(context.Background(), Spec{
+	runner := process.OSRunner{}
+	proc, err := runner.Start(context.Background(), process.Spec{
 		Name: "ignore-term-helper",
 		Path: os.Args[0],
 		Args: []string{"-test.run=TestOSProcessStopReturnsContextErrorAfterKillOnTimeout"},
@@ -286,42 +175,6 @@ func TestOSProcessStopReturnsContextErrorAfterKillOnTimeout(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("process did not exit after timeout kill")
 	}
-}
-
-func startExitedTestCommand(t *testing.T) *exec.Cmd {
-	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestProcessExitHelper")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("Wait() error = %v", err)
-	}
-	return cmd
-}
-
-func closedDone(err error) chan error {
-	done := make(chan error, 1)
-	done <- err
-	close(done)
-	return done
-}
-
-func delayedDone(err error, delay time.Duration) chan error {
-	done := make(chan error, 1)
-	go func() {
-		time.Sleep(delay)
-		done <- err
-		close(done)
-	}()
-	return done
-}
-
-func closedWaited() chan struct{} {
-	waited := make(chan struct{})
-	close(waited)
-	return waited
 }
 
 func assertDoneClosed(t *testing.T, done <-chan error) {

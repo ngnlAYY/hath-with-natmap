@@ -1,6 +1,7 @@
-package config
+package config_test
 
 import (
+	config "github.com/ngnlAYY/hath-with-natter/internal/config"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -67,9 +68,9 @@ func TestLoadValidConfig(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() 返回错误: %v", err)
+		t.Fatalf("config.Load() 返回错误: %v", err)
 	}
 
 	if cfg.Network.BindPort != 4567 {
@@ -88,9 +89,9 @@ func TestLoadOldConfigWithoutExternalUpdateTimeoutStillLoads(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 	if cfg.Network.ExternalUpdateTimeout.Duration != 60*time.Second {
 		t.Fatalf("ExternalUpdateTimeout = %v, want 60s", cfg.Network.ExternalUpdateTimeout.Duration)
@@ -105,9 +106,9 @@ func TestLoadEHentaiSkipPortUpdate(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 	if !cfg.EHentai.SkipPortUpdate {
 		t.Fatal("EHentai.SkipPortUpdate = false, want true")
@@ -124,9 +125,9 @@ func TestLoadSkipPortUpdateDoesNotRequireEHentaiCookie(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 	if !cfg.EHentai.SkipPortUpdate {
 		t.Fatal("EHentai.SkipPortUpdate = false, want true")
@@ -141,9 +142,9 @@ func TestLoadBandwidthAllowReplaceRootQdisc(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 	if !cfg.Bandwidth.AllowReplaceRootQdisc {
 		t.Fatal("Bandwidth.AllowReplaceRootQdisc = false, want true")
@@ -172,9 +173,9 @@ func TestLoadParameterWhitelistConfig(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 
 	if cfg.Natmap.AddressFamily != "ipv6" {
@@ -204,9 +205,9 @@ func TestLoadDefaultsMappingModeToNatmap(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 	if cfg.Mapping.Mode != "natmap" {
 		t.Fatalf("Mapping.Mode = %q, want natmap", cfg.Mapping.Mode)
@@ -228,9 +229,9 @@ func TestLoadUPnPModeDoesNotRequireNatmapFields(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 	if cfg.Mapping.Mode != "upnp" {
 		t.Fatalf("Mapping.Mode = %q, want upnp", cfg.Mapping.Mode)
@@ -255,9 +256,9 @@ natmap:
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 	if cfg.Mapping.Mode != "upnp" {
 		t.Fatalf("Mapping.Mode = %q, want upnp", cfg.Mapping.Mode)
@@ -272,9 +273,9 @@ func TestValidateRejectsInvalidMappingMode(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "mapping.mode") {
-		t.Fatalf("Load() error = %v, want mapping.mode validation error", err)
+		t.Fatalf("config.Load() error = %v, want mapping.mode validation error", err)
 	}
 }
 
@@ -338,9 +339,9 @@ natmap:
 				t.Fatalf("写入配置失败: %v", err)
 			}
 
-			_, err := Load(path)
+			_, err := config.Load(path)
 			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("Load() error = %v, want %s validation error", err, tt.wantError)
+				t.Fatalf("config.Load() error = %v, want %s validation error", err, tt.wantError)
 			}
 		})
 	}
@@ -354,9 +355,9 @@ func TestValidateRejectsMissingSecret(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "ehentai.pass_hash") {
-		t.Fatalf("Load() error = %v, want ehentai.pass_hash validation error", err)
+		t.Fatalf("config.Load() error = %v, want ehentai.pass_hash validation error", err)
 	}
 }
 
@@ -368,9 +369,9 @@ func TestValidateRejectsInvalidPort(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "network.bind_port") {
-		t.Fatalf("Load() error = %v, want network.bind_port validation error", err)
+		t.Fatalf("config.Load() error = %v, want network.bind_port validation error", err)
 	}
 }
 
@@ -382,9 +383,9 @@ func TestValidateRejectsEnabledProxyWithoutURL(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "proxy.url") {
-		t.Fatalf("Load() error = %v, want proxy.url validation error", err)
+		t.Fatalf("config.Load() error = %v, want proxy.url validation error", err)
 	}
 }
 
@@ -398,9 +399,9 @@ func TestValidateRequiresProxyURLWhenUsedForHathDownloads(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "proxy.url") {
-		t.Fatalf("Load() error = %v, want proxy.url validation error", err)
+		t.Fatalf("config.Load() error = %v, want proxy.url validation error", err)
 	}
 }
 
@@ -412,9 +413,9 @@ func TestValidateRejectsProxyURLWithCredentials(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "proxy.url 不能包含用户名或密码") {
-		t.Fatalf("Load() error = %v, want proxy.url credential validation error", err)
+		t.Fatalf("config.Load() error = %v, want proxy.url credential validation error", err)
 	}
 }
 
@@ -426,9 +427,9 @@ func TestValidateRejectsUnsupportedProxyScheme(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "http、https 或 socks5") {
-		t.Fatalf("Load() error = %v, want unsupported proxy scheme validation error", err)
+		t.Fatalf("config.Load() error = %v, want unsupported proxy scheme validation error", err)
 	}
 }
 
@@ -441,9 +442,9 @@ func TestValidateRejectsInvalidBandwidthLimit(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "bandwidth.upload_limit") {
-		t.Fatalf("Load() error = %v, want bandwidth.upload_limit validation error", err)
+		t.Fatalf("config.Load() error = %v, want bandwidth.upload_limit validation error", err)
 	}
 }
 
@@ -459,9 +460,9 @@ func TestValidateRejectsInvalidBandwidthInterface(t *testing.T) {
 				t.Fatalf("写入配置失败: %v", err)
 			}
 
-			_, err := Load(path)
+			_, err := config.Load(path)
 			if err == nil || !strings.Contains(err.Error(), "bandwidth.interface") {
-				t.Fatalf("Load() error = %v, want bandwidth.interface validation error", err)
+				t.Fatalf("config.Load() error = %v, want bandwidth.interface validation error", err)
 			}
 		})
 	}
@@ -475,9 +476,9 @@ func TestValidateRejectsInvalidNatmapAddressFamily(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "natmap.address_family") {
-		t.Fatalf("Load() error = %v, want natmap.address_family validation error", err)
+		t.Fatalf("config.Load() error = %v, want natmap.address_family validation error", err)
 	}
 }
 
@@ -492,9 +493,9 @@ func TestLoadAcceptsValidNatmapInterface(t *testing.T) {
 				t.Fatalf("写入配置失败: %v", err)
 			}
 
-			cfg, err := Load(path)
+			cfg, err := config.Load(path)
 			if err != nil {
-				t.Fatalf("Load() error = %v", err)
+				t.Fatalf("config.Load() error = %v", err)
 			}
 			if cfg.Natmap.Interface != iface {
 				t.Fatalf("Natmap.Interface = %q, want %q", cfg.Natmap.Interface, iface)
@@ -514,9 +515,9 @@ func TestValidateRejectsInvalidNatmapInterface(t *testing.T) {
 				t.Fatalf("写入配置失败: %v", err)
 			}
 
-			_, err := Load(path)
+			_, err := config.Load(path)
 			if err == nil || !strings.Contains(err.Error(), "natmap.interface") {
-				t.Fatalf("Load() error = %v, want natmap.interface validation error", err)
+				t.Fatalf("config.Load() error = %v, want natmap.interface validation error", err)
 			}
 		})
 	}
@@ -533,9 +534,9 @@ func TestLoadAcceptsValidNatmapFWMark(t *testing.T) {
 				t.Fatalf("写入配置失败: %v", err)
 			}
 
-			cfg, err := Load(path)
+			cfg, err := config.Load(path)
 			if err != nil {
-				t.Fatalf("Load() error = %v", err)
+				t.Fatalf("config.Load() error = %v", err)
 			}
 			if cfg.Natmap.FWMark != fwmark {
 				t.Fatalf("Natmap.FWMark = %q, want %q", cfg.Natmap.FWMark, fwmark)
@@ -556,9 +557,9 @@ func TestValidateRejectsInvalidNatmapFWMark(t *testing.T) {
 				t.Fatalf("写入配置失败: %v", err)
 			}
 
-			_, err := Load(path)
+			_, err := config.Load(path)
 			if err == nil || err.Error() != wantError {
-				t.Fatalf("Load() error = %v, want %q", err, wantError)
+				t.Fatalf("config.Load() error = %v, want %q", err, wantError)
 			}
 		})
 	}
@@ -572,9 +573,9 @@ func TestValidateRejectsInvalidNatmapUDPCheckCycle(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "natmap.udp_check_cycle") {
-		t.Fatalf("Load() error = %v, want natmap.udp_check_cycle validation error", err)
+		t.Fatalf("config.Load() error = %v, want natmap.udp_check_cycle validation error", err)
 	}
 }
 
@@ -589,9 +590,9 @@ func TestValidateRejectsInvalidNatmapKeepaliveIntervalPrecision(t *testing.T) {
 				t.Fatalf("写入配置失败: %v", err)
 			}
 
-			_, err := Load(path)
+			_, err := config.Load(path)
 			if err == nil || !strings.Contains(err.Error(), "natmap.keepalive_interval") {
-				t.Fatalf("Load() error = %v, want natmap.keepalive_interval validation error", err)
+				t.Fatalf("config.Load() error = %v, want natmap.keepalive_interval validation error", err)
 			}
 		})
 	}
@@ -605,9 +606,9 @@ func TestValidateRejectsNegativeHathMaxConnection(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	_, err := Load(path)
+	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "hath.max_connection") {
-		t.Fatalf("Load() error = %v, want hath.max_connection validation error", err)
+		t.Fatalf("config.Load() error = %v, want hath.max_connection validation error", err)
 	}
 }
 
@@ -619,9 +620,9 @@ func TestEnsureWritableDirRemovesProbeFile(t *testing.T) {
 		t.Fatalf("写入配置失败: %v", err)
 	}
 
-	cfg, err := Load(path)
+	cfg, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("config.Load() error = %v", err)
 	}
 	probe := filepath.Join(cfg.Hath.DataDir, ".write-test")
 	if _, err := os.Stat(probe); !os.IsNotExist(err) {

@@ -54,7 +54,7 @@ jobs:
         run: go test -race ./...
 
       - name: Run coverage tests
-        run: go test -cover ./...
+        run: go test -coverpkg=./... ./tests/...
 
       - name: Run go vet
         run: go vet ./...
@@ -83,7 +83,7 @@ jobs:
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
-          file: docker/Dockerfile
+          file: deploy/docker/Dockerfile
           load: true
           platforms: linux/amd64
           tags: hath-with-natter:smoke
@@ -91,15 +91,20 @@ jobs:
       - name: Smoke test image
         if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: |
-          docker run --rm --entrypoint /bin/sh hath-with-natter:smoke -c '/usr/local/bin/hath-natmap --help 2>&1 | grep -q "Usage of hath-natmap"'
-          docker run --rm --entrypoint /bin/sh hath-with-natter:smoke -c 'test -x /usr/local/bin/natmap && test -x /usr/local/bin/hath-rust'
+          set +e
+          help_output="$(docker run --rm hath-with-natter:smoke --help 2>&1)"
+          help_status="$?"
+          set -e
+          test "$help_status" -eq 1
+          printf '%s\n' "$help_output" | grep -q "Usage of hath-natmap"
+          docker run --rm --entrypoint /bin/sh hath-with-natter:smoke -c 'test -x /usr/local/bin/natmap && test -x /usr/local/bin/hath-rust && test "$(id -u):$(id -g)" = "1000:1000"'
 
       - name: Build and push release image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
-          file: docker/Dockerfile
+          file: deploy/docker/Dockerfile
           push: true
           platforms: linux/amd64
           tags: taskmgr818/hath-with-natter:latest

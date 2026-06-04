@@ -27,17 +27,20 @@ cp configs/config.example.yaml config.yaml
 构建镜像：
 
 ```bash
-docker build -f docker/Dockerfile -t hath:natmap-rust .
+docker build -f deploy/docker/Dockerfile -t hath:natmap-rust .
 ```
 
 运行容器：
 
 ```bash
+mkdir -p hath
+chown -R 1000:1000 hath
+
 docker run --rm \
   --name natmap-rust \
   --net host \
-  -e PUID="$(id -u)" \
-  -e PGID="$(id -g)" \
+  --user 1000:1000 \
+  --tmpfs /run/hath-natmap:uid=1000,gid=1000,mode=700 \
   -v "$PWD/config.yaml:/config/config.yaml:ro" \
   -v "$PWD/hath:/data/hath" \
   hath:natmap-rust
@@ -53,10 +56,10 @@ docker run --rm \
 
 ```bash
 # 使用已有的 hath:natmap-rust 镜像
-docker compose -f docker/docker-compose.yaml up -d
+docker compose -f deploy/docker/docker-compose.yaml up -d
 
 # 或从本地源码构建镜像后运行
-docker compose -f docker/docker-compose.build.yaml up -d --build
+docker compose -f deploy/docker/docker-compose.build.yaml up -d --build
 ```
 
 ## 文档

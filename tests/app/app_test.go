@@ -1,4 +1,4 @@
-package main
+package app_test
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngnlAYY/hath-with-natter/internal/app"
 	"github.com/ngnlAYY/hath-with-natter/internal/bandwidth"
 	"github.com/ngnlAYY/hath-with-natter/internal/config"
 	"github.com/ngnlAYY/hath-with-natter/internal/hath"
@@ -151,7 +152,7 @@ func TestBuildPortUpdaterSkipsEHentaiPortUpdate(t *testing.T) {
 		log.SetFlags(oldFlags)
 	}()
 
-	updater := buildPortUpdater(config.Config{EHentai: config.EHentaiConfig{SkipPortUpdate: true}}, ehentaiPanicUpdater{})
+	updater := app.BuildPortUpdater(config.Config{EHentai: config.EHentaiConfig{SkipPortUpdate: true}}, ehentaiPanicUpdater{})
 	if err := updater.UpdatePort(context.Background(), 4567); err != nil {
 		t.Fatalf("UpdatePort() error = %v", err)
 	}
@@ -164,7 +165,7 @@ func TestBuildPortUpdaterSkippedUpdateRespectsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	updater := buildPortUpdater(config.Config{EHentai: config.EHentaiConfig{SkipPortUpdate: true}}, ehentaiPanicUpdater{})
+	updater := app.BuildPortUpdater(config.Config{EHentai: config.EHentaiConfig{SkipPortUpdate: true}}, ehentaiPanicUpdater{})
 	if err := updater.UpdatePort(ctx, 4567); !errors.Is(err, context.Canceled) {
 		t.Fatalf("UpdatePort() error = %v, want context.Canceled", err)
 	}
@@ -187,7 +188,7 @@ func TestBuildRuntimeWiresRetryMaxDelay(t *testing.T) {
 		},
 	}
 
-	runtime := buildRuntime(cfg, nil, nil, "notify-token")
+	runtime := app.BuildRuntime(cfg, nil, nil, "notify-token")
 
 	if runtime.RetryDelay != cfg.Runtime.Retry.InitialDelay.Duration {
 		t.Fatalf("runtime.RetryDelay = %s, want %s", runtime.RetryDelay, cfg.Runtime.Retry.InitialDelay.Duration)
@@ -205,9 +206,9 @@ func TestBuildUpdaterHTTPClientClonesDefaultTransport(t *testing.T) {
 	req := &http.Request{URL: &url.URL{Scheme: "https", Host: "example.com"}}
 	originalProxyURL, originalProxyErr := defaultTransport.Proxy(req)
 
-	client, err := buildUpdaterHTTPClient(cfg)
+	client, err := app.BuildUpdaterHTTPClient(cfg)
 	if err != nil {
-		t.Fatalf("buildUpdaterHTTPClient returned error: %v", err)
+		t.Fatalf("app.BuildUpdaterHTTPClient returned error: %v", err)
 	}
 
 	transport, ok := client.Transport.(*http.Transport)
@@ -239,9 +240,9 @@ func TestBuildUpdaterHTTPClientUsesConfiguredProxy(t *testing.T) {
 		},
 	}
 
-	client, err := buildUpdaterHTTPClient(cfg)
+	client, err := app.BuildUpdaterHTTPClient(cfg)
 	if err != nil {
-		t.Fatalf("buildUpdaterHTTPClient returned error: %v", err)
+		t.Fatalf("app.BuildUpdaterHTTPClient returned error: %v", err)
 	}
 	transport, ok := client.Transport.(*http.Transport)
 	if !ok {
@@ -267,15 +268,15 @@ func TestBuildUpdaterHTTPClientReturnsErrorForInvalidDefaultTransport(t *testing
 
 	t.Run("nil", func(t *testing.T) {
 		http.DefaultTransport = nil
-		if _, err := buildUpdaterHTTPClient(config.Config{}); err == nil {
-			t.Fatalf("buildUpdaterHTTPClient returned nil error, want error")
+		if _, err := app.BuildUpdaterHTTPClient(config.Config{}); err == nil {
+			t.Fatalf("app.BuildUpdaterHTTPClient returned nil error, want error")
 		}
 	})
 
 	t.Run("non-http-transport", func(t *testing.T) {
 		http.DefaultTransport = fakeRoundTripper{}
-		if _, err := buildUpdaterHTTPClient(config.Config{}); err == nil {
-			t.Fatalf("buildUpdaterHTTPClient returned nil error, want error")
+		if _, err := app.BuildUpdaterHTTPClient(config.Config{}); err == nil {
+			t.Fatalf("app.BuildUpdaterHTTPClient returned nil error, want error")
 		}
 	})
 }
@@ -283,8 +284,8 @@ func TestBuildUpdaterHTTPClientReturnsErrorForInvalidDefaultTransport(t *testing
 func TestEnsureNotifySocketDirUsesConfiguredSocketParent(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "custom", "notify.sock")
 
-	if err := ensureNotifySocketDir(socketPath); err != nil {
-		t.Fatalf("ensureNotifySocketDir() error = %v", err)
+	if err := app.EnsureNotifySocketDir(socketPath); err != nil {
+		t.Fatalf("app.EnsureNotifySocketDir() error = %v", err)
 	}
 
 	info, err := os.Stat(filepath.Dir(socketPath))
@@ -305,8 +306,8 @@ func TestEnsureNotifySocketDirDoesNotChmodExistingParent(t *testing.T) {
 		t.Fatalf("Mkdir() error = %v", err)
 	}
 
-	if err := ensureNotifySocketDir(filepath.Join(dir, "notify.sock")); err != nil {
-		t.Fatalf("ensureNotifySocketDir() error = %v", err)
+	if err := app.EnsureNotifySocketDir(filepath.Join(dir, "notify.sock")); err != nil {
+		t.Fatalf("app.EnsureNotifySocketDir() error = %v", err)
 	}
 
 	info, err := os.Stat(dir)
@@ -331,9 +332,9 @@ func TestEnsureNotifySocketDirRejectsFileParent(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	err := ensureNotifySocketDir(filepath.Join(parent, "notify.sock"))
+	err := app.EnsureNotifySocketDir(filepath.Join(parent, "notify.sock"))
 	if err == nil || !strings.Contains(err.Error(), "不是目录") {
-		t.Fatalf("ensureNotifySocketDir() error = %v, want not directory error", err)
+		t.Fatalf("app.EnsureNotifySocketDir() error = %v, want not directory error", err)
 	}
 }
 
@@ -346,14 +347,14 @@ func TestBuildUPnPConfigUsesBindPortLeaseAndDescription(t *testing.T) {
 		},
 	}
 
-	got := buildUPnPConfig(cfg)
+	got := app.BuildUPnPConfig(cfg)
 	want := upnp.Config{
 		Port:          4567,
 		LeaseDuration: 30,
 		Description:   "upnp-test",
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("buildUPnPConfig() = %#v, want %#v", got, want)
+		t.Fatalf("app.BuildUPnPConfig() = %#v, want %#v", got, want)
 	}
 }
 
@@ -406,7 +407,7 @@ func TestBuildRuntimeWiresWhitelistConfig(t *testing.T) {
 			},
 		},
 	}
-	runtime := buildRuntime(cfg, nil, nil, "notify-token")
+	runtime := app.BuildRuntime(cfg, nil, nil, "notify-token")
 
 	natmapRunner, ok := runtime.Natmap.(*natmap.ProcessRunner)
 	if !ok {
@@ -483,12 +484,12 @@ func TestApplyBandwidthLimitWiresAllowReplaceRootQdisc(t *testing.T) {
 		},
 	}
 
-	limiter := buildBandwidthLimiter(cfg)
+	limiter := app.BuildBandwidthLimiter(cfg)
 	limiter.Runner = runner
 
-	clear, err := applyBandwidthLimit(context.Background(), cfg, limiter, nilNETAdmin)
+	clear, err := app.ApplyBandwidthLimit(context.Background(), cfg, limiter, nilNETAdmin)
 	if err != nil {
-		t.Fatalf("applyBandwidthLimit returned error: %v", err)
+		t.Fatalf("app.ApplyBandwidthLimit returned error: %v", err)
 	}
 	_ = clear
 
@@ -518,13 +519,13 @@ func TestApplyBandwidthLimitAppliesAndClearsWhenEnabled(t *testing.T) {
 		},
 	}
 
-	clear, err := applyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{
+	clear, err := app.ApplyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{
 		Runner:      runner,
 		Interface:   cfg.Bandwidth.Interface,
 		UploadLimit: cfg.Bandwidth.UploadLimit,
 	}, nilNETAdmin)
 	if err != nil {
-		t.Fatalf("applyBandwidthLimit returned error: %v", err)
+		t.Fatalf("app.ApplyBandwidthLimit returned error: %v", err)
 	}
 	clear()
 
@@ -546,9 +547,9 @@ func TestApplyBandwidthLimitSkipsWhenDisabled(t *testing.T) {
 	runner := &fakeBandwidthRunner{}
 	cfg := config.Config{Bandwidth: config.BandwidthConfig{Enabled: false}}
 
-	clear, err := applyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{Runner: runner}, nilNETAdmin)
+	clear, err := app.ApplyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{Runner: runner}, nilNETAdmin)
 	if err != nil {
-		t.Fatalf("applyBandwidthLimit returned error: %v", err)
+		t.Fatalf("app.ApplyBandwidthLimit returned error: %v", err)
 	}
 	clear()
 
@@ -567,13 +568,13 @@ func TestApplyBandwidthLimitReturnsApplyError(t *testing.T) {
 		Bandwidth: config.BandwidthConfig{Enabled: true, Interface: "eth0", UploadLimit: "10mbit"},
 	}
 
-	_, err := applyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{
+	_, err := app.ApplyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{
 		Runner:      runner,
 		Interface:   cfg.Bandwidth.Interface,
 		UploadLimit: cfg.Bandwidth.UploadLimit,
 	}, nilNETAdmin)
 	if err == nil || !strings.Contains(err.Error(), "配置上传限速失败") {
-		t.Fatalf("applyBandwidthLimit error = %v, want bandwidth apply error", err)
+		t.Fatalf("app.ApplyBandwidthLimit error = %v, want bandwidth apply error", err)
 	}
 }
 
@@ -584,11 +585,11 @@ func TestApplyBandwidthLimitReturnsNETAdminError(t *testing.T) {
 		Bandwidth: config.BandwidthConfig{Enabled: true, Interface: "eth0", UploadLimit: "10mbit"},
 	}
 
-	_, err := applyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{Runner: runner}, func() error {
+	_, err := app.ApplyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{Runner: runner}, func() error {
 		return errors.New("missing net admin")
 	})
 	if err == nil || !strings.Contains(err.Error(), "missing net admin") {
-		t.Fatalf("applyBandwidthLimit error = %v, want NET_ADMIN error", err)
+		t.Fatalf("app.ApplyBandwidthLimit error = %v, want NET_ADMIN error", err)
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("tc calls = %#v, want none", runner.calls)
@@ -617,13 +618,13 @@ func TestApplyBandwidthLimitLogsClearError(t *testing.T) {
 		log.SetFlags(oldFlags)
 	}()
 
-	clear, err := applyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{
+	clear, err := app.ApplyBandwidthLimit(context.Background(), cfg, bandwidth.Limiter{
 		Runner:      runner,
 		Interface:   cfg.Bandwidth.Interface,
 		UploadLimit: cfg.Bandwidth.UploadLimit,
 	}, nilNETAdmin)
 	if err != nil {
-		t.Fatalf("applyBandwidthLimit returned error: %v", err)
+		t.Fatalf("app.ApplyBandwidthLimit returned error: %v", err)
 	}
 	clear()
 

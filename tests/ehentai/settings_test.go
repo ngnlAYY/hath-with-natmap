@@ -1,8 +1,9 @@
-package ehentai
+package ehentai_test
 
 import (
 	"context"
 	"fmt"
+	ehentai "github.com/ngnlAYY/hath-with-natter/internal/ehentai"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,9 +17,9 @@ func TestParseSettingsForm(t *testing.T) {
 <input type="checkbox" name="enabled" checked="checked">
 <input type="checkbox" name="ignored">
 </form></body></html>`
-	form, locked, err := ParseSettingsForm(strings.NewReader(html))
+	form, locked, err := ehentai.ParseSettingsForm(strings.NewReader(html))
 	if err != nil {
-		t.Fatalf("ParseSettingsForm() error = %v", err)
+		t.Fatalf("ehentai.ParseSettingsForm() error = %v", err)
 	}
 	if locked {
 		t.Fatal("locked = true, want false")
@@ -39,9 +40,9 @@ func TestParseSettingsForm(t *testing.T) {
 
 func TestParseSettingsFormDetectsLockedPort(t *testing.T) {
 	html := `<input name="f_port" value="1234" disabled="disabled">`
-	_, locked, err := ParseSettingsForm(strings.NewReader(html))
+	_, locked, err := ehentai.ParseSettingsForm(strings.NewReader(html))
 	if err != nil {
-		t.Fatalf("ParseSettingsForm() error = %v", err)
+		t.Fatalf("ehentai.ParseSettingsForm() error = %v", err)
 	}
 	if !locked {
 		t.Fatal("locked = false, want true")
@@ -49,9 +50,9 @@ func TestParseSettingsFormDetectsLockedPort(t *testing.T) {
 }
 
 func TestParseSettingsFormRequiresPort(t *testing.T) {
-	_, _, err := ParseSettingsForm(strings.NewReader(`<input name="name" value="client">`))
+	_, _, err := ehentai.ParseSettingsForm(strings.NewReader(`<input name="name" value="client">`))
 	if err == nil || !strings.Contains(err.Error(), "缺少 f_port") {
-		t.Fatalf("ParseSettingsForm() error = %v, want missing f_port", err)
+		t.Fatalf("ehentai.ParseSettingsForm() error = %v, want missing f_port", err)
 	}
 }
 
@@ -96,7 +97,7 @@ func TestUpdatePortPostsExistingFieldsWithNewPort(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := Client{
+	client := ehentai.Client{
 		HTTPClient: server.Client(),
 		BaseURL:    server.URL + "/",
 		MemberID:   "123456",
@@ -133,7 +134,7 @@ func TestUpdatePortReturnsErrorWhenPostedPortIsNotConfirmed(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := Client{HTTPClient: server.Client(), BaseURL: server.URL, MemberID: "123", PassHash: "pass", ClientID: "999"}
+	client := ehentai.Client{HTTPClient: server.Client(), BaseURL: server.URL, MemberID: "123", PassHash: "pass", ClientID: "999"}
 	err := client.UpdatePort(context.Background(), 45678)
 	if err == nil || !strings.Contains(err.Error(), "确认 Hentai@Home 端口更新失败") {
 		t.Fatalf("UpdatePort() error = %v, want confirmation failure", err)
@@ -146,9 +147,9 @@ func TestUpdatePortReturnsLockedError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := Client{HTTPClient: server.Client(), BaseURL: server.URL, MemberID: "123", PassHash: "pass", ClientID: "999"}
+	client := ehentai.Client{HTTPClient: server.Client(), BaseURL: server.URL, MemberID: "123", PassHash: "pass", ClientID: "999"}
 	err := client.UpdatePort(context.Background(), 45678)
-	if err == nil || !IsPortLocked(err) {
+	if err == nil || !ehentai.IsPortLocked(err) {
 		t.Fatalf("UpdatePort() error = %v, want port locked", err)
 	}
 }
@@ -159,7 +160,7 @@ func TestUpdatePortReturnsGetStatusError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := Client{HTTPClient: server.Client(), BaseURL: server.URL, MemberID: "123", PassHash: "pass", ClientID: "999"}
+	client := ehentai.Client{HTTPClient: server.Client(), BaseURL: server.URL, MemberID: "123", PassHash: "pass", ClientID: "999"}
 	err := client.UpdatePort(context.Background(), 45678)
 	if err == nil || !strings.Contains(err.Error(), "获取 Hentai@Home 设置页失败") {
 		t.Fatalf("UpdatePort() error = %v, want GET status context", err)

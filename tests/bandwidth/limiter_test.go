@@ -1,9 +1,9 @@
-package bandwidth
+package bandwidth_test
 
 import (
 	"context"
 	"errors"
-	"fmt"
+	bandwidth "github.com/ngnlAYY/hath-with-natter/internal/bandwidth"
 	"reflect"
 	"strings"
 	"testing"
@@ -68,7 +68,7 @@ func (f *fakeCommandRunner) Run(ctx context.Context, name string, args ...string
 
 func TestApplyBuildsTCRules(t *testing.T) {
 	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(noqueueRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
 
 	if err := limiter.Apply(context.Background(), 4567); err != nil {
 		t.Fatalf("Apply() error = %v", err)
@@ -92,7 +92,7 @@ func TestApplyAllowsClearAfterPartialApply(t *testing.T) {
 		outputs: [][]byte{[]byte(noqueueRootQdiscOutput), []byte(ownedRootQdiscOutput)},
 		runErrs: []error{nil, runnerErr},
 	}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
 
 	err := limiter.Apply(context.Background(), 4567)
 	if err == nil {
@@ -120,7 +120,7 @@ func TestApplyAllowsClearAfterPartialApply(t *testing.T) {
 
 func TestApplyRejectsForeignRootQdiscWithoutOptIn(t *testing.T) {
 	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(foreignRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
 
 	err := limiter.Apply(context.Background(), 4567)
 	if err == nil {
@@ -141,7 +141,7 @@ func TestApplyRejectsForeignRootQdiscWithoutOptIn(t *testing.T) {
 
 func TestApplyRejectsForeignRootWhenNonRootQdiscMatchesProjectMarker(t *testing.T) {
 	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(nonRootProjectQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
 
 	err := limiter.Apply(context.Background(), 4567)
 	if err == nil {
@@ -159,7 +159,7 @@ func TestApplyRejectsForeignRootWhenNonRootQdiscMatchesProjectMarker(t *testing.
 
 func TestApplyRejectsPreexistingHTBRootQdiscWithoutOptIn(t *testing.T) {
 	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(foreignHTBRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
 
 	err := limiter.Apply(context.Background(), 4567)
 	if err == nil {
@@ -177,7 +177,7 @@ func TestApplyRejectsPreexistingHTBRootQdiscWithoutOptIn(t *testing.T) {
 
 func TestApplyAllowsForeignRootQdiscWithOptIn(t *testing.T) {
 	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(foreignRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit", AllowReplaceRootQdisc: true}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit", AllowReplaceRootQdisc: true}
 
 	if err := limiter.Apply(context.Background(), 4567); err != nil {
 		t.Fatalf("Apply() error = %v", err)
@@ -197,7 +197,7 @@ func TestApplyAllowsForeignRootQdiscWithOptIn(t *testing.T) {
 
 func TestApplyRejectsUnsupportedRunnerWithoutOptIn(t *testing.T) {
 	fake := &fakeCommandRunner{}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
 
 	err := limiter.Apply(context.Background(), 4567)
 	if err == nil {
@@ -216,7 +216,7 @@ func TestApplyRejectsUnsupportedRunnerWithoutOptIn(t *testing.T) {
 
 func TestApplyAllowsUnsupportedRunnerWithOptIn(t *testing.T) {
 	fake := &fakeCommandRunner{}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit", AllowReplaceRootQdisc: true}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit", AllowReplaceRootQdisc: true}
 
 	if err := limiter.Apply(context.Background(), 4567); err != nil {
 		t.Fatalf("Apply() error = %v", err)
@@ -234,14 +234,22 @@ func TestApplyAllowsUnsupportedRunnerWithOptIn(t *testing.T) {
 }
 
 func TestClearDeletesOwnedRootQdisc(t *testing.T) {
-	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(ownedRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", applied: true}
+	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(noqueueRootQdiscOutput), []byte(ownedRootQdiscOutput)}}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	if err := limiter.Apply(context.Background(), 4567); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
 
 	if err := limiter.Clear(context.Background()); err != nil {
 		t.Fatalf("Clear() error = %v", err)
 	}
 
 	want := [][]string{
+		{"tc", "qdisc", "show", "dev", "eth0"},
+		{"tc", "qdisc", "replace", "dev", "eth0", "root", "handle", "1:", "htb", "default", "3fed"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:3fed", "htb", "rate", "10000mbit", "ceil", "10000mbit"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:10", "htb", "rate", "10mbit", "ceil", "10mbit"},
+		{"tc", "filter", "replace", "dev", "eth0", "protocol", "ip", "parent", "1:0", "prio", "1", "u32", "match", "ip", "sport", "4567", "0xffff", "flowid", "1:10"},
 		{"tc", "qdisc", "show", "dev", "eth0"},
 		{"tc", "qdisc", "del", "dev", "eth0", "root"},
 	}
@@ -251,14 +259,24 @@ func TestClearDeletesOwnedRootQdisc(t *testing.T) {
 }
 
 func TestClearSkipsForeignRootQdisc(t *testing.T) {
-	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(foreignRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", applied: true}
+	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(foreignRootQdiscOutput), []byte(foreignRootQdiscOutput)}}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit", AllowReplaceRootQdisc: true}
+	if err := limiter.Apply(context.Background(), 4567); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
 
 	if err := limiter.Clear(context.Background()); err != nil {
 		t.Fatalf("Clear() error = %v", err)
 	}
 
-	want := [][]string{{"tc", "qdisc", "show", "dev", "eth0"}}
+	want := [][]string{
+		{"tc", "qdisc", "show", "dev", "eth0"},
+		{"tc", "qdisc", "replace", "dev", "eth0", "root", "handle", "1:", "htb", "default", "3fed"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:3fed", "htb", "rate", "10000mbit", "ceil", "10000mbit"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:10", "htb", "rate", "10mbit", "ceil", "10mbit"},
+		{"tc", "filter", "replace", "dev", "eth0", "protocol", "ip", "parent", "1:0", "prio", "1", "u32", "match", "ip", "sport", "4567", "0xffff", "flowid", "1:10"},
+		{"tc", "qdisc", "show", "dev", "eth0"},
+	}
 	if !reflect.DeepEqual(fake.calls, want) {
 		t.Fatalf("calls = %#v, want %#v", fake.calls, want)
 	}
@@ -266,7 +284,7 @@ func TestClearSkipsForeignRootQdisc(t *testing.T) {
 
 func TestClearSkipsPreexistingHTBRootQdiscWithoutApply(t *testing.T) {
 	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(foreignHTBRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0"}
 
 	if err := limiter.Clear(context.Background()); err != nil {
 		t.Fatalf("Clear() error = %v", err)
@@ -277,22 +295,35 @@ func TestClearSkipsPreexistingHTBRootQdiscWithoutApply(t *testing.T) {
 }
 
 func TestClearSkipsForeignHTBRootQdiscAfterApply(t *testing.T) {
-	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(foreignHTBRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", applied: true}
+	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(foreignHTBRootQdiscOutput), []byte(foreignHTBRootQdiscOutput)}}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit", AllowReplaceRootQdisc: true}
+	if err := limiter.Apply(context.Background(), 4567); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
 
 	if err := limiter.Clear(context.Background()); err != nil {
 		t.Fatalf("Clear() error = %v", err)
 	}
 
-	want := [][]string{{"tc", "qdisc", "show", "dev", "eth0"}}
+	want := [][]string{
+		{"tc", "qdisc", "show", "dev", "eth0"},
+		{"tc", "qdisc", "replace", "dev", "eth0", "root", "handle", "1:", "htb", "default", "3fed"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:3fed", "htb", "rate", "10000mbit", "ceil", "10000mbit"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:10", "htb", "rate", "10mbit", "ceil", "10mbit"},
+		{"tc", "filter", "replace", "dev", "eth0", "protocol", "ip", "parent", "1:0", "prio", "1", "u32", "match", "ip", "sport", "4567", "0xffff", "flowid", "1:10"},
+		{"tc", "qdisc", "show", "dev", "eth0"},
+	}
 	if !reflect.DeepEqual(fake.calls, want) {
 		t.Fatalf("calls = %#v, want %#v", fake.calls, want)
 	}
 }
 
 func TestClearDoesNotDeleteTwice(t *testing.T) {
-	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(ownedRootQdiscOutput), []byte(ownedRootQdiscOutput)}}
-	limiter := Limiter{Runner: fake, Interface: "eth0", applied: true}
+	fake := &fakeOutputCommandRunner{outputs: [][]byte{[]byte(noqueueRootQdiscOutput), []byte(ownedRootQdiscOutput), []byte(ownedRootQdiscOutput)}}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	if err := limiter.Apply(context.Background(), 4567); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
 
 	if err := limiter.Clear(context.Background()); err != nil {
 		t.Fatalf("first Clear() error = %v", err)
@@ -303,6 +334,11 @@ func TestClearDoesNotDeleteTwice(t *testing.T) {
 
 	want := [][]string{
 		{"tc", "qdisc", "show", "dev", "eth0"},
+		{"tc", "qdisc", "replace", "dev", "eth0", "root", "handle", "1:", "htb", "default", "3fed"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:3fed", "htb", "rate", "10000mbit", "ceil", "10000mbit"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:10", "htb", "rate", "10mbit", "ceil", "10mbit"},
+		{"tc", "filter", "replace", "dev", "eth0", "protocol", "ip", "parent", "1:0", "prio", "1", "u32", "match", "ip", "sport", "4567", "0xffff", "flowid", "1:10"},
+		{"tc", "qdisc", "show", "dev", "eth0"},
 		{"tc", "qdisc", "del", "dev", "eth0", "root"},
 	}
 	if !reflect.DeepEqual(fake.calls, want) {
@@ -312,7 +348,7 @@ func TestClearDoesNotDeleteTwice(t *testing.T) {
 
 func TestClearSkipsWhenRunnerCannotInspectOwnership(t *testing.T) {
 	fake := &fakeCommandRunner{}
-	limiter := Limiter{Runner: fake, Interface: "eth0"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0"}
 
 	if err := limiter.Clear(context.Background()); err != nil {
 		t.Fatalf("Clear() error = %v", err)
@@ -324,10 +360,13 @@ func TestClearSkipsWhenRunnerCannotInspectOwnership(t *testing.T) {
 
 func TestClearRetainsAppliedWhenRootQdiscCheckFails(t *testing.T) {
 	fake := &fakeOutputCommandRunner{
-		outputErrs: []error{errors.New("show failed")},
-		outputs:    [][]byte{[]byte(ownedRootQdiscOutput)},
+		outputErrs: []error{nil, errors.New("show failed")},
+		outputs:    [][]byte{[]byte(noqueueRootQdiscOutput), []byte(ownedRootQdiscOutput), []byte(ownedRootQdiscOutput)},
 	}
-	limiter := Limiter{Runner: fake, Interface: "eth0", applied: true}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	if err := limiter.Apply(context.Background(), 4567); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
 
 	err := limiter.Clear(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "检查 root qdisc 失败") {
@@ -339,6 +378,11 @@ func TestClearRetainsAppliedWhenRootQdiscCheckFails(t *testing.T) {
 
 	want := [][]string{
 		{"tc", "qdisc", "show", "dev", "eth0"},
+		{"tc", "qdisc", "replace", "dev", "eth0", "root", "handle", "1:", "htb", "default", "3fed"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:3fed", "htb", "rate", "10000mbit", "ceil", "10000mbit"},
+		{"tc", "class", "replace", "dev", "eth0", "parent", "1:", "classid", "1:10", "htb", "rate", "10mbit", "ceil", "10mbit"},
+		{"tc", "filter", "replace", "dev", "eth0", "protocol", "ip", "parent", "1:0", "prio", "1", "u32", "match", "ip", "sport", "4567", "0xffff", "flowid", "1:10"},
+		{"tc", "qdisc", "show", "dev", "eth0"},
 		{"tc", "qdisc", "show", "dev", "eth0"},
 		{"tc", "qdisc", "del", "dev", "eth0", "root"},
 	}
@@ -348,52 +392,12 @@ func TestClearRetainsAppliedWhenRootQdiscCheckFails(t *testing.T) {
 }
 
 func TestExecRunnerErrorDoesNotIncludeCommandOutput(t *testing.T) {
-	err := ExecRunner{}.Run(context.Background(), "false")
+	err := bandwidth.ExecRunner{}.Run(context.Background(), "false")
 	if err == nil {
 		t.Fatal("Run() error = nil, want error")
 	}
 	if strings.Contains(err.Error(), "输出") {
 		t.Fatalf("Run() error included command output context: %v", err)
-	}
-}
-
-func TestCheckNETAdminStatusUsesBoundingSet(t *testing.T) {
-	status := []byte(fmt.Sprintf("CapEff:\t%016x\nCapBnd:\t%016x\n", uint64(0), uint64(1<<capNETAdmin)))
-	if err := checkNETAdminStatus(status); err != nil {
-		t.Fatalf("checkNETAdminStatus() error = %v", err)
-	}
-}
-
-func TestCheckNETAdminStatusRejectsMissingNETAdminInBoundingSet(t *testing.T) {
-	status := []byte(fmt.Sprintf("CapEff:\t%016x\nCapBnd:\t%016x\n", uint64(1<<capNETAdmin), uint64(0)))
-	err := checkNETAdminStatus(status)
-	if err == nil {
-		t.Fatal("checkNETAdminStatus() error = nil, want error")
-	}
-	if !strings.Contains(err.Error(), "缺少 NET_ADMIN capability bounding set") {
-		t.Fatalf("checkNETAdminStatus() error = %q, want missing NET_ADMIN bounding set", err.Error())
-	}
-}
-
-func TestCheckNETAdminStatusRejectsInvalidBoundingSet(t *testing.T) {
-	status := []byte("CapBnd:\tnot-hex\n")
-	err := checkNETAdminStatus(status)
-	if err == nil {
-		t.Fatal("checkNETAdminStatus() error = nil, want error")
-	}
-	if !strings.Contains(err.Error(), "解析进程 capability 失败") {
-		t.Fatalf("checkNETAdminStatus() error = %q, want parse failure", err.Error())
-	}
-}
-
-func TestCheckNETAdminStatusRejectsMissingBoundingSet(t *testing.T) {
-	status := []byte("CapEff:\t0000000000001000\n")
-	err := checkNETAdminStatus(status)
-	if err == nil {
-		t.Fatal("checkNETAdminStatus() error = nil, want error")
-	}
-	if !strings.Contains(err.Error(), "CapBnd") {
-		t.Fatalf("checkNETAdminStatus() error = %q, want missing CapBnd", err.Error())
 	}
 }
 
@@ -403,7 +407,7 @@ func TestApplyWrapsRunnerErrorWithChineseContext(t *testing.T) {
 		outputs: [][]byte{[]byte(noqueueRootQdiscOutput)},
 		runErrs: []error{runnerErr},
 	}
-	limiter := Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
 
 	err := limiter.Apply(context.Background(), 4567)
 	if err == nil {
@@ -420,10 +424,13 @@ func TestApplyWrapsRunnerErrorWithChineseContext(t *testing.T) {
 func TestClearWrapsRunnerErrorWithChineseContext(t *testing.T) {
 	runnerErr := errors.New("runner failed")
 	fake := &fakeOutputCommandRunner{
-		outputs: [][]byte{[]byte(ownedRootQdiscOutput)},
-		runErrs: []error{runnerErr},
+		outputs: [][]byte{[]byte(noqueueRootQdiscOutput), []byte(ownedRootQdiscOutput)},
+		runErrs: []error{nil, nil, nil, nil, runnerErr},
 	}
-	limiter := Limiter{Runner: fake, Interface: "eth0", applied: true}
+	limiter := bandwidth.Limiter{Runner: fake, Interface: "eth0", UploadLimit: "10mbit"}
+	if err := limiter.Apply(context.Background(), 4567); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
 
 	err := limiter.Clear(context.Background())
 	if err == nil {

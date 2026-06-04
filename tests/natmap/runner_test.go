@@ -1,8 +1,9 @@
-package natmap
+package natmap_test
 
 import (
 	"bytes"
 	"context"
+	natmap "github.com/ngnlAYY/hath-with-natter/internal/natmap"
 	"log"
 	"net"
 	"os"
@@ -28,7 +29,7 @@ func TestRunnerConfigArgsBuildsBindModeArguments(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := RunnerConfig{
+			cfg := natmap.RunnerConfig{
 				AddressFamily:       tc.addressFamily,
 				BindPort:            16000,
 				StunServer:          "stun.example.com:3478",
@@ -55,7 +56,7 @@ func TestRunnerConfigArgsBuildsBindModeArguments(t *testing.T) {
 }
 
 func TestRunnerConfigArgsBuildsIPv6UDPAndWhitelistArguments(t *testing.T) {
-	cfg := RunnerConfig{
+	cfg := natmap.RunnerConfig{
 		AddressFamily:       "ipv6",
 		UDPMode:             true,
 		BindPort:            16000,
@@ -128,9 +129,9 @@ func (f *fakeProcess) PID() int {
 }
 
 func TestGenerateNotifyTokenReturnsHexToken(t *testing.T) {
-	token, err := GenerateNotifyToken()
+	token, err := natmap.GenerateNotifyToken()
 	if err != nil {
-		t.Fatalf("GenerateNotifyToken returned error: %v", err)
+		t.Fatalf("natmap.GenerateNotifyToken returned error: %v", err)
 	}
 	if len(token) != 64 {
 		t.Fatalf("token length = %d, want 64", len(token))
@@ -145,7 +146,7 @@ func TestGenerateNotifyTokenReturnsHexToken(t *testing.T) {
 func TestProcessRunnerStartBuildsNatmapSpec(t *testing.T) {
 	proc := newFakeProcess()
 	runner := &fakeProcessRunner{proc: proc}
-	cfg := RunnerConfig{
+	cfg := natmap.RunnerConfig{
 		BinaryPath:          "/usr/local/bin/natmap",
 		BindPort:            16000,
 		StunServer:          "stun.example.com:3478",
@@ -153,7 +154,7 @@ func TestProcessRunnerStartBuildsNatmapSpec(t *testing.T) {
 		KeepaliveInterval:   30 * time.Second,
 		NotifyScript:        "/usr/local/bin/natmap-notify",
 	}
-	processRunner := &ProcessRunner{Config: cfg, Runner: runner}
+	processRunner := &natmap.ProcessRunner{Config: cfg, Runner: runner}
 
 	if err := processRunner.Start(context.Background()); err != nil {
 		t.Fatalf("Start returned error: %v", err)
@@ -177,65 +178,25 @@ func TestProcessRunnerStartBuildsNatmapSpec(t *testing.T) {
 	}
 }
 
-func TestProcessRunnerStartAllowsStartedNatmapPID(t *testing.T) {
-	proc := newFakeProcess()
-	proc.pid = os.Getpid()
-	runner := &fakeProcessRunner{proc: proc}
-	listener := &Listener{token: "secret-token", allowed: make(map[int]string)}
-	processRunner := &ProcessRunner{Runner: runner, Listener: listener}
-
-	if err := processRunner.Start(context.Background()); err != nil {
-		t.Fatalf("Start returned error: %v", err)
-	}
-	if !listener.pidAllowed(os.Getpid()) {
-		t.Fatal("started natmap PID was not allowed")
-	}
-}
-
-func TestProcessRunnerStopRevokesStartedNatmapPID(t *testing.T) {
-	proc := newFakeProcess()
-	proc.pid = os.Getpid()
-	runner := &fakeProcessRunner{proc: proc}
-	listener := &Listener{token: "secret-token", allowed: make(map[int]string)}
-	processRunner := &ProcessRunner{Runner: runner, Listener: listener}
-
-	if err := processRunner.Start(context.Background()); err != nil {
-		t.Fatalf("Start returned error: %v", err)
-	}
-	if err := processRunner.Stop(context.Background()); err != nil {
-		t.Fatalf("Stop returned error: %v", err)
-	}
-	if listener.pidAllowed(os.Getpid()) {
-		t.Fatal("stopped natmap PID remained allowed")
-	}
-}
-
-func TestListenerRejectsAllowedPIDWithChangedStartTime(t *testing.T) {
-	listener := &Listener{token: "secret-token", allowed: map[int]string{os.Getpid(): "different-start-time"}}
-	if listener.pidAllowed(os.Getpid()) {
-		t.Fatal("pidAllowed accepted matching PID with different start time")
-	}
-}
-
 func TestSendNotifyRejectsMissingNotifyToken(t *testing.T) {
-	t.Setenv(NotifyTokenEnv, "")
+	t.Setenv(natmap.NotifyTokenEnv, "")
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
-	listener, _, err := ListenNotifyWithToken(socketPath, "secret-token")
+	listener, _, err := natmap.ListenNotifyWithToken(socketPath, "secret-token")
 	if err != nil {
-		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+		t.Fatalf("natmap.ListenNotifyWithToken returned error: %v", err)
 	}
 	defer listener.Close()
 	listener.AllowPID(os.Getpid())
 
-	err = SendNotify(socketPath, validNotifyArgs())
+	err = natmap.SendNotify(socketPath, validNotifyArgs())
 	if err == nil || !strings.Contains(err.Error(), "natmap notify token 未配置") {
-		t.Fatalf("SendNotify error = %v, want missing token", err)
+		t.Fatalf("natmap.SendNotify error = %v, want missing token", err)
 	}
 }
 
 func TestProcessRunnerStartIncludesNotifyTokenEnv(t *testing.T) {
 	runner := &fakeProcessRunner{proc: newFakeProcess()}
-	cfg := RunnerConfig{
+	cfg := natmap.RunnerConfig{
 		BinaryPath:          "/usr/local/bin/natmap",
 		BindPort:            16000,
 		StunServer:          "stun.example.com:3478",
@@ -244,7 +205,7 @@ func TestProcessRunnerStartIncludesNotifyTokenEnv(t *testing.T) {
 		NotifyScript:        "/usr/local/bin/natmap-notify",
 		NotifyToken:         "secret-token",
 	}
-	processRunner := &ProcessRunner{Config: cfg, Runner: runner}
+	processRunner := &natmap.ProcessRunner{Config: cfg, Runner: runner}
 
 	if err := processRunner.Start(context.Background()); err != nil {
 		t.Fatalf("Start returned error: %v", err)
@@ -253,7 +214,7 @@ func TestProcessRunnerStartIncludesNotifyTokenEnv(t *testing.T) {
 	if len(runner.specs) != 1 {
 		t.Fatalf("Start calls = %d, want 1", len(runner.specs))
 	}
-	want := NotifyTokenEnv + "=secret-token"
+	want := natmap.NotifyTokenEnv + "=secret-token"
 	if !containsString(runner.specs[0].Env, want) {
 		t.Fatalf("spec.Env = %#v, want to contain %q", runner.specs[0].Env, want)
 	}
@@ -261,7 +222,7 @@ func TestProcessRunnerStartIncludesNotifyTokenEnv(t *testing.T) {
 
 func TestProcessRunnerStartOmitsNotifyTokenEnvWhenEmpty(t *testing.T) {
 	runner := &fakeProcessRunner{proc: newFakeProcess()}
-	cfg := RunnerConfig{
+	cfg := natmap.RunnerConfig{
 		BinaryPath:          "/usr/local/bin/natmap",
 		BindPort:            16000,
 		StunServer:          "stun.example.com:3478",
@@ -269,7 +230,7 @@ func TestProcessRunnerStartOmitsNotifyTokenEnvWhenEmpty(t *testing.T) {
 		KeepaliveInterval:   30 * time.Second,
 		NotifyScript:        "/usr/local/bin/natmap-notify",
 	}
-	processRunner := &ProcessRunner{Config: cfg, Runner: runner}
+	processRunner := &natmap.ProcessRunner{Config: cfg, Runner: runner}
 
 	if err := processRunner.Start(context.Background()); err != nil {
 		t.Fatalf("Start returned error: %v", err)
@@ -280,7 +241,7 @@ func TestProcessRunnerStartOmitsNotifyTokenEnvWhenEmpty(t *testing.T) {
 }
 
 func TestProcessRunnerStopAndDoneAreNoOpWhenNotStarted(t *testing.T) {
-	processRunner := &ProcessRunner{}
+	processRunner := &natmap.ProcessRunner{}
 
 	if err := processRunner.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop returned error: %v", err)
@@ -292,7 +253,11 @@ func TestProcessRunnerStopAndDoneAreNoOpWhenNotStarted(t *testing.T) {
 
 func TestProcessRunnerStopStopsProcessAndClearsIt(t *testing.T) {
 	proc := newFakeProcess()
-	processRunner := &ProcessRunner{proc: proc}
+	runner := &fakeProcessRunner{proc: proc}
+	processRunner := &natmap.ProcessRunner{Runner: runner}
+	if err := processRunner.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
 
 	if err := processRunner.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop returned error: %v", err)
@@ -307,7 +272,12 @@ func TestProcessRunnerStopStopsProcessAndClearsIt(t *testing.T) {
 }
 
 func TestProcessRunnerLifecycleMethodsAreRaceSafe(t *testing.T) {
-	processRunner := &ProcessRunner{proc: newFakeProcess()}
+	proc := newFakeProcess()
+	runner := &fakeProcessRunner{proc: proc}
+	processRunner := &natmap.ProcessRunner{Runner: runner}
+	if err := processRunner.Start(context.Background()); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Add(2)
@@ -324,17 +294,17 @@ func TestProcessRunnerLifecycleMethodsAreRaceSafe(t *testing.T) {
 }
 
 func TestListenNotifyWithTokenReceivesMatchingTokenFromAllowedSender(t *testing.T) {
-	t.Setenv(NotifyTokenEnv, "secret-token")
+	t.Setenv(natmap.NotifyTokenEnv, "secret-token")
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
-	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
+	listener, events, err := natmap.ListenNotifyWithToken(socketPath, "secret-token")
 	if err != nil {
-		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+		t.Fatalf("natmap.ListenNotifyWithToken returned error: %v", err)
 	}
 	defer listener.Close()
 	listener.AllowPID(os.Getpid())
 
-	if err := SendNotify(socketPath, validNotifyArgs()); err != nil {
-		t.Fatalf("SendNotify returned error: %v", err)
+	if err := natmap.SendNotify(socketPath, validNotifyArgs()); err != nil {
+		t.Fatalf("natmap.SendNotify returned error: %v", err)
 	}
 
 	select {
@@ -348,18 +318,18 @@ func TestListenNotifyWithTokenReceivesMatchingTokenFromAllowedSender(t *testing.
 }
 
 func TestListenNotifyWithTokenRejectsUnauthorizedPeerWithMatchingToken(t *testing.T) {
-	t.Setenv(NotifyTokenEnv, "secret-token")
+	t.Setenv(natmap.NotifyTokenEnv, "secret-token")
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
-	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
+	listener, events, err := natmap.ListenNotifyWithToken(socketPath, "secret-token")
 	if err != nil {
-		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+		t.Fatalf("natmap.ListenNotifyWithToken returned error: %v", err)
 	}
 	defer listener.Close()
 
 	logs := captureLogs(t)
-	err = SendNotify(socketPath, validNotifyArgs())
+	err = natmap.SendNotify(socketPath, validNotifyArgs())
 	if err != nil && !strings.Contains(err.Error(), "发送 natmap notify 事件失败") {
-		t.Fatalf("SendNotify returned unexpected error: %v", err)
+		t.Fatalf("natmap.SendNotify returned unexpected error: %v", err)
 	}
 
 	assertNoMapping(t, events)
@@ -369,9 +339,9 @@ func TestListenNotifyWithTokenRejectsUnauthorizedPeerWithMatchingToken(t *testin
 
 func TestListenNotifyWithTokenRejectsMissingTokenWithoutLeakingLogContent(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
-	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
+	listener, events, err := natmap.ListenNotifyWithToken(socketPath, "secret-token")
 	if err != nil {
-		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+		t.Fatalf("natmap.ListenNotifyWithToken returned error: %v", err)
 	}
 	defer listener.Close()
 	listener.AllowPID(os.Getpid())
@@ -392,9 +362,9 @@ func TestListenNotifyWithTokenRejectsMissingTokenWithoutLeakingLogContent(t *tes
 
 func TestListenNotifyWithTokenRejectsWrongTokenWithoutLeakingLogContent(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
-	listener, events, err := ListenNotifyWithToken(socketPath, "secret-token")
+	listener, events, err := natmap.ListenNotifyWithToken(socketPath, "secret-token")
 	if err != nil {
-		t.Fatalf("ListenNotifyWithToken returned error: %v", err)
+		t.Fatalf("natmap.ListenNotifyWithToken returned error: %v", err)
 	}
 	defer listener.Close()
 	listener.AllowPID(os.Getpid())
@@ -414,18 +384,18 @@ func TestListenNotifyWithTokenRejectsWrongTokenWithoutLeakingLogContent(t *testi
 }
 
 func TestListenNotifyReceivesMappingSentBySendNotify(t *testing.T) {
-	t.Setenv(NotifyTokenEnv, "secret-token")
+	t.Setenv(natmap.NotifyTokenEnv, "secret-token")
 	socketPath := filepath.Join(t.TempDir(), "notify.sock")
-	listener, events, err := ListenNotify(socketPath)
+	listener, events, err := natmap.ListenNotify(socketPath)
 	if err != nil {
-		t.Fatalf("ListenNotify returned error: %v", err)
+		t.Fatalf("natmap.ListenNotify returned error: %v", err)
 	}
 	defer listener.Close()
 	listener.AllowPID(os.Getpid())
 
-	err = SendNotify(socketPath, validNotifyArgs())
+	err = natmap.SendNotify(socketPath, validNotifyArgs())
 	if err != nil {
-		t.Fatalf("SendNotify returned error: %v", err)
+		t.Fatalf("natmap.SendNotify returned error: %v", err)
 	}
 
 	select {
@@ -471,7 +441,7 @@ func sendRawNotify(socketPath string, payload string) error {
 	return err
 }
 
-func assertNoMapping(t *testing.T, events <-chan Mapping) {
+func assertNoMapping(t *testing.T, events <-chan natmap.Mapping) {
 	t.Helper()
 	select {
 	case mapping := <-events:

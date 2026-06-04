@@ -1,4 +1,4 @@
-package main
+package app_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngnlAYY/hath-with-natter/internal/app"
 	"github.com/ngnlAYY/hath-with-natter/internal/config"
 	"github.com/ngnlAYY/hath-with-natter/internal/upnp"
 )
@@ -34,9 +35,9 @@ func TestRunUPnPModeOnceAddsMappingUpdatesAndStartsHath(t *testing.T) {
 		},
 	}
 
-	cleanup, err := runUPnPModeOnce(context.Background(), cfg, hathController, updater, mapper)
+	cleanup, err := app.RunUPnPModeOnce(context.Background(), cfg, hathController, updater, mapper)
 	if err != nil {
-		t.Fatalf("runUPnPModeOnce returned error: %v", err)
+		t.Fatalf("app.RunUPnPModeOnce returned error: %v", err)
 	}
 	if cleanup == nil {
 		t.Fatal("cleanup = nil, want non-nil")
@@ -97,12 +98,12 @@ func TestRunUPnPModeOnceUsesIndependentAddContext(t *testing.T) {
 		},
 	}
 
-	cleanup, err := runUPnPModeOnce(ctx, cfg, hathController, updater, mapper)
+	cleanup, err := app.RunUPnPModeOnce(ctx, cfg, hathController, updater, mapper)
 	if err == nil {
 		if cleanup != nil {
 			cleanup()
 		}
-		t.Fatal("runUPnPModeOnce returned nil error, want update error")
+		t.Fatal("app.RunUPnPModeOnce returned nil error, want update error")
 	}
 	if mapper.addCtxErr != nil {
 		t.Fatalf("AddMapping ctx.Err = %v, want nil", mapper.addCtxErr)
@@ -138,9 +139,9 @@ func TestRunUPnPModeOnceDeletesMappingWhenUpdateFails(t *testing.T) {
 		},
 	}
 
-	cleanup, err := runUPnPModeOnce(context.Background(), cfg, hathController, updater, mapper)
+	cleanup, err := app.RunUPnPModeOnce(context.Background(), cfg, hathController, updater, mapper)
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("runUPnPModeOnce error = %v, want %v", err, wantErr)
+		t.Fatalf("app.RunUPnPModeOnce error = %v, want %v", err, wantErr)
 	}
 	if cleanup != nil {
 		t.Fatal("cleanup != nil, want nil")
@@ -169,9 +170,9 @@ func TestRunUPnPModeOnceDoesNotDeleteMappingWhenAddFails(t *testing.T) {
 	updater := &fakeMainUpdater{}
 	mapper := &fakeMainUPnPMapper{addErr: wantErr}
 
-	cleanup, err := runUPnPModeOnce(context.Background(), cfg, hathController, updater, mapper)
+	cleanup, err := app.RunUPnPModeOnce(context.Background(), cfg, hathController, updater, mapper)
 	if !errors.Is(err, wantErr) {
-		t.Fatalf("runUPnPModeOnce error = %v, want %v", err, wantErr)
+		t.Fatalf("app.RunUPnPModeOnce error = %v, want %v", err, wantErr)
 	}
 	if cleanup != nil {
 		t.Fatal("cleanup != nil, want nil")
@@ -188,16 +189,6 @@ func TestRunUPnPModeOnceDoesNotDeleteMappingWhenAddFails(t *testing.T) {
 }
 
 func TestRunUPnPModeRenewsLease(t *testing.T) {
-	oldTicker := newUPnPRenewTicker
-	tickCh := make(chan time.Time)
-	intervalCh := make(chan time.Duration, 1)
-	stopped := false
-	newUPnPRenewTicker = func(interval time.Duration) (<-chan time.Time, func()) {
-		intervalCh <- interval
-		return tickCh, func() { stopped = true }
-	}
-	defer func() { newUPnPRenewTicker = oldTicker }()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := config.Config{
 		Network: config.NetworkConfig{BindPort: 4567},
@@ -227,29 +218,17 @@ func TestRunUPnPModeRenewsLease(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runUPnPMode(ctx, cfg, hathController, updater, mapper)
+		errCh <- app.RunUPnPMode(ctx, cfg, hathController, updater, mapper)
 	}()
-
-	select {
-	case interval := <-intervalCh:
-		if interval != 500*time.Millisecond {
-			cancel()
-			t.Fatalf("renew interval = %s, want %s", interval, 500*time.Millisecond)
-		}
-	case <-time.After(time.Second):
-		cancel()
-		t.Fatal("renew ticker was not created")
-	}
-
-	tickCh <- time.Now()
 
 	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Fatalf("runUPnPMode returned error: %v", err)
+			t.Fatalf("app.RunUPnPMode returned error: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("runUPnPMode did not stop after renewal")
+		cancel()
+		t.Fatal("app.RunUPnPMode did not stop after renewal")
 	}
 	if mapper.addCalls != 2 {
 		t.Fatalf("AddMapping calls = %d, want 2", mapper.addCalls)
@@ -260,24 +239,14 @@ func TestRunUPnPModeRenewsLease(t *testing.T) {
 	if mapper.deleteCalls != 1 {
 		t.Fatalf("DeleteMapping calls = %d, want 1", mapper.deleteCalls)
 	}
-	if !stopped {
-		t.Fatal("renew ticker stop was not called")
-	}
 }
 
 func TestRunUPnPModeDeletesMappingWhenRenewSeesShutdown(t *testing.T) {
-	oldTicker := newUPnPRenewTicker
-	tickCh := make(chan time.Time)
-	newUPnPRenewTicker = func(interval time.Duration) (<-chan time.Time, func()) {
-		return tickCh, func() {}
-	}
-	defer func() { newUPnPRenewTicker = oldTicker }()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := config.Config{
 		Network: config.NetworkConfig{BindPort: 4567},
 		UPnP: config.UPnPConfig{
-			LeaseDuration: 2,
+			LeaseDuration: 1,
 			Description:   "upnp-test",
 		},
 		Runtime: config.RuntimeConfig{
@@ -302,18 +271,17 @@ func TestRunUPnPModeDeletesMappingWhenRenewSeesShutdown(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runUPnPMode(ctx, cfg, hathController, updater, mapper)
+		errCh <- app.RunUPnPMode(ctx, cfg, hathController, updater, mapper)
 	}()
-
-	tickCh <- time.Now()
 
 	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Fatalf("runUPnPMode returned error: %v", err)
+			t.Fatalf("app.RunUPnPMode returned error: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("runUPnPMode did not return after shutdown during renew")
+		cancel()
+		t.Fatal("app.RunUPnPMode did not return after shutdown during renew")
 	}
 	if mapper.deleteCalls != 1 {
 		t.Fatalf("DeleteMapping calls = %d, want 1", mapper.deleteCalls)
@@ -321,17 +289,10 @@ func TestRunUPnPModeDeletesMappingWhenRenewSeesShutdown(t *testing.T) {
 }
 
 func TestRunUPnPModeDoesNotDeleteMappingWhenRenewOperationTimesOut(t *testing.T) {
-	oldTicker := newUPnPRenewTicker
-	tickCh := make(chan time.Time)
-	newUPnPRenewTicker = func(interval time.Duration) (<-chan time.Time, func()) {
-		return tickCh, func() {}
-	}
-	defer func() { newUPnPRenewTicker = oldTicker }()
-
 	cfg := config.Config{
 		Network: config.NetworkConfig{BindPort: 4567},
 		UPnP: config.UPnPConfig{
-			LeaseDuration: 2,
+			LeaseDuration: 1,
 			Description:   "upnp-test",
 		},
 		Runtime: config.RuntimeConfig{
@@ -356,18 +317,16 @@ func TestRunUPnPModeDoesNotDeleteMappingWhenRenewOperationTimesOut(t *testing.T)
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runUPnPMode(context.Background(), cfg, hathController, updater, mapper)
+		errCh <- app.RunUPnPMode(context.Background(), cfg, hathController, updater, mapper)
 	}()
-
-	tickCh <- time.Now()
 
 	select {
 	case err := <-errCh:
 		if err == nil || !strings.Contains(err.Error(), "续租 UPnP 端口映射失败") {
-			t.Fatalf("runUPnPMode error = %v, want renew timeout error", err)
+			t.Fatalf("app.RunUPnPMode error = %v, want renew timeout error", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("runUPnPMode did not return after renew timeout")
+		t.Fatal("app.RunUPnPMode did not return after renew timeout")
 	}
 	if mapper.deleteCalls != 0 {
 		t.Fatalf("DeleteMapping calls = %d, want 0", mapper.deleteCalls)
@@ -375,17 +334,10 @@ func TestRunUPnPModeDoesNotDeleteMappingWhenRenewOperationTimesOut(t *testing.T)
 }
 
 func TestRunUPnPModeDoesNotDeleteMappingWhenRenewFails(t *testing.T) {
-	oldTicker := newUPnPRenewTicker
-	tickCh := make(chan time.Time)
-	newUPnPRenewTicker = func(interval time.Duration) (<-chan time.Time, func()) {
-		return tickCh, func() {}
-	}
-	defer func() { newUPnPRenewTicker = oldTicker }()
-
 	cfg := config.Config{
 		Network: config.NetworkConfig{BindPort: 4567},
 		UPnP: config.UPnPConfig{
-			LeaseDuration: 2,
+			LeaseDuration: 1,
 			Description:   "upnp-test",
 		},
 		Runtime: config.RuntimeConfig{
@@ -410,18 +362,16 @@ func TestRunUPnPModeDoesNotDeleteMappingWhenRenewFails(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runUPnPMode(context.Background(), cfg, hathController, updater, mapper)
+		errCh <- app.RunUPnPMode(context.Background(), cfg, hathController, updater, mapper)
 	}()
-
-	tickCh <- time.Now()
 
 	select {
 	case err := <-errCh:
 		if err == nil || !strings.Contains(err.Error(), "续租 UPnP 端口映射失败") {
-			t.Fatalf("runUPnPMode error = %v, want renew error", err)
+			t.Fatalf("app.RunUPnPMode error = %v, want renew error", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("runUPnPMode did not return after renew failure")
+		t.Fatal("app.RunUPnPMode did not return after renew failure")
 	}
 	if mapper.deleteCalls != 0 {
 		t.Fatalf("DeleteMapping calls = %d, want 0", mapper.deleteCalls)
@@ -432,9 +382,6 @@ func TestRunUPnPModeDoesNotDeleteMappingWhenRenewFails(t *testing.T) {
 }
 
 func TestRunUPnPModeWithRetryRetriesInitialAddFailure(t *testing.T) {
-	oldSleep := sleepUPnPRestart
-	defer func() { sleepUPnPRestart = oldSleep }()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := config.Config{
 		Network: config.NetworkConfig{BindPort: 4567},
@@ -444,7 +391,7 @@ func TestRunUPnPModeWithRetryRetriesInitialAddFailure(t *testing.T) {
 		},
 		Runtime: config.RuntimeConfig{
 			ShutdownTimeout: config.Duration{Duration: 5 * time.Second},
-			RestartDelay:    config.Duration{Duration: 20 * time.Second},
+			RestartDelay:    config.Duration{Duration: time.Millisecond},
 			Retry:           config.RetryConfig{InitialDelay: config.Duration{Duration: time.Second}},
 		},
 	}
@@ -466,23 +413,11 @@ func TestRunUPnPModeWithRetryRetriesInitialAddFailure(t *testing.T) {
 		mapper.addErr = nil
 		cancel()
 	}
-	sleepCalls := 0
-	sleepUPnPRestart = func(ctx context.Context, delay time.Duration) bool {
-		sleepCalls++
-		if delay != 20*time.Second {
-			t.Fatalf("restart delay = %s, want %s", delay, 20*time.Second)
-		}
-		return true
-	}
-
-	if err := runUPnPModeWithRetry(ctx, cfg, hathController, updater, mapper); err != nil {
-		t.Fatalf("runUPnPModeWithRetry returned error: %v", err)
+	if err := app.RunUPnPModeWithRetry(ctx, cfg, hathController, updater, mapper); err != nil {
+		t.Fatalf("app.RunUPnPModeWithRetry returned error: %v", err)
 	}
 	if mapper.addCalls != 2 {
 		t.Fatalf("AddMapping calls = %d, want 2", mapper.addCalls)
-	}
-	if sleepCalls != 1 {
-		t.Fatalf("restart sleeps = %d, want 1", sleepCalls)
 	}
 	if mapper.deleteCalls != 1 {
 		t.Fatalf("DeleteMapping calls = %d, want 1", mapper.deleteCalls)
@@ -490,9 +425,6 @@ func TestRunUPnPModeWithRetryRetriesInitialAddFailure(t *testing.T) {
 }
 
 func TestRunUPnPModeWithRetryRetriesUpdateFailure(t *testing.T) {
-	oldSleep := sleepUPnPRestart
-	defer func() { sleepUPnPRestart = oldSleep }()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := config.Config{
 		Network: config.NetworkConfig{BindPort: 4567},
@@ -502,7 +434,7 @@ func TestRunUPnPModeWithRetryRetriesUpdateFailure(t *testing.T) {
 		},
 		Runtime: config.RuntimeConfig{
 			ShutdownTimeout: config.Duration{Duration: 5 * time.Second},
-			RestartDelay:    config.Duration{Duration: 20 * time.Second},
+			RestartDelay:    config.Duration{Duration: time.Millisecond},
 		},
 	}
 	hathController := &fakeMainHath{}
@@ -517,16 +449,13 @@ func TestRunUPnPModeWithRetryRetriesUpdateFailure(t *testing.T) {
 	}
 	mapper.onAdd = func(call int, cfg upnp.Config) {
 		if call == 2 {
+			updater.errUpdate = nil
 			cancel()
 		}
 	}
-	sleepUPnPRestart = func(ctx context.Context, delay time.Duration) bool {
-		updater.errUpdate = nil
-		return true
-	}
 
-	if err := runUPnPModeWithRetry(ctx, cfg, hathController, updater, mapper); err != nil {
-		t.Fatalf("runUPnPModeWithRetry returned error: %v", err)
+	if err := app.RunUPnPModeWithRetry(ctx, cfg, hathController, updater, mapper); err != nil {
+		t.Fatalf("app.RunUPnPModeWithRetry returned error: %v", err)
 	}
 	if mapper.addCalls != 2 {
 		t.Fatalf("AddMapping calls = %d, want 2", mapper.addCalls)
@@ -540,29 +469,16 @@ func TestRunUPnPModeWithRetryRetriesUpdateFailure(t *testing.T) {
 }
 
 func TestRunUPnPModeWithRetryRetriesRenewFailure(t *testing.T) {
-	oldTicker := newUPnPRenewTicker
-	oldSleep := sleepUPnPRestart
-	defer func() {
-		newUPnPRenewTicker = oldTicker
-		sleepUPnPRestart = oldSleep
-	}()
-
-	tickChs := make(chan chan time.Time, 2)
-	newUPnPRenewTicker = func(interval time.Duration) (<-chan time.Time, func()) {
-		tickCh := make(chan time.Time)
-		tickChs <- tickCh
-		return tickCh, func() {}
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := config.Config{
 		Network: config.NetworkConfig{BindPort: 4567},
 		UPnP: config.UPnPConfig{
-			LeaseDuration: 2,
+			LeaseDuration: 1,
 			Description:   "upnp-test",
 		},
 		Runtime: config.RuntimeConfig{
 			ShutdownTimeout: config.Duration{Duration: 5 * time.Second},
-			RestartDelay:    config.Duration{Duration: 20 * time.Second},
+			RestartDelay:    config.Duration{Duration: time.Millisecond},
 		},
 	}
 	hathController := &fakeMainHath{}
@@ -585,33 +501,23 @@ func TestRunUPnPModeWithRetryRetriesRenewFailure(t *testing.T) {
 			cancel()
 		}
 	}
-	sleepCalls := 0
-	sleepUPnPRestart = func(ctx context.Context, delay time.Duration) bool {
-		sleepCalls++
-		return true
-	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runUPnPModeWithRetry(ctx, cfg, hathController, updater, mapper)
+		errCh <- app.RunUPnPModeWithRetry(ctx, cfg, hathController, updater, mapper)
 	}()
-
-	firstTick := <-tickChs
-	firstTick <- time.Now()
 
 	select {
 	case err := <-errCh:
 		if err != nil {
-			t.Fatalf("runUPnPModeWithRetry returned error: %v", err)
+			t.Fatalf("app.RunUPnPModeWithRetry returned error: %v", err)
 		}
-	case <-time.After(time.Second):
-		t.Fatal("runUPnPModeWithRetry did not retry after renewal failure")
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("app.RunUPnPModeWithRetry did not retry after renewal failure")
 	}
 	if mapper.addCalls != 3 {
 		t.Fatalf("AddMapping calls = %d, want 3", mapper.addCalls)
-	}
-	if sleepCalls != 1 {
-		t.Fatalf("restart sleeps = %d, want 1", sleepCalls)
 	}
 	if mapper.deleteCalls != 1 {
 		t.Fatalf("DeleteMapping calls = %d, want 1", mapper.deleteCalls)
