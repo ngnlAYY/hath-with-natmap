@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -97,17 +98,15 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll("/run/hath-natmap", 0o700); err != nil {
-		return fmt.Errorf("创建运行目录失败: %w", err)
-	}
-	if err := os.Chmod("/run/hath-natmap", 0o700); err != nil {
-		return fmt.Errorf("设置运行目录权限失败: %w", err)
+	socketPath := notifySocketPath()
+	if err := ensureNotifySocketDir(socketPath); err != nil {
+		return err
 	}
 	notifyToken, err := natmap.GenerateNotifyToken()
 	if err != nil {
 		return err
 	}
-	listener, events, err := natmap.ListenNotifyWithToken(notifySocketPath(), notifyToken)
+	listener, events, err := natmap.ListenNotifyWithToken(socketPath, notifyToken)
 	if err != nil {
 		return fmt.Errorf("启动 natmap notify socket 失败: %w", err)
 	}
@@ -186,11 +185,7 @@ func cloneDefaultHTTPTransport() (*http.Transport, error) {
 }
 
 func runUPnPModeOnce(ctx context.Context, cfg config.Config, hathController supervisor.HathController, updater supervisor.PortUpdater, mapper upnpMapper) (func(), error) {
-	upnpCfg := upnp.Config{
-		Port:          cfg.Network.BindPort,
-		LeaseDuration: uint32(cfg.UPnP.LeaseDuration),
-		Description:   cfg.UPnP.Description,
-	}
+	upnpCfg := buildUPnPConfig(cfg)
 	operationCtx, cancel := upnpOperationContext(cfg)
 	mapping, err := mapper.AddMapping(operationCtx, upnpCfg)
 	cancel()
@@ -270,11 +265,7 @@ func runUPnPMode(ctx context.Context, cfg config.Config, hathController supervis
 		tickCh, stopTicker := newUPnPRenewTicker(interval)
 		defer stopTicker()
 
-		upnpCfg := upnp.Config{
-			Port:          cfg.Network.BindPort,
-			LeaseDuration: leaseDurationSeconds,
-			Description:   cfg.UPnP.Description,
-		}
+		upnpCfg := buildUPnPConfig(cfg)
 		for {
 			select {
 			case <-ctx.Done():
@@ -380,4 +371,57 @@ func notifySocketPath() string {
 		return socketPath
 	}
 	return natmap.DefaultNotifySocket
+}
+
+func ensureNotifySocketDir(socketPath string) error {
+	dir := filepath.Dir(socketPath)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	info, err := os.Stat(dir)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("natmap notify 运行目录不是目录: %s", dir)
+		}
+		if dir == filepath.Dir(natmap.DefaultNotifySocket) {
+			if err := os.Chmod(dir, 0o700); err != nil {
+				return fmt.Errorf("设置 natmap notify 运行目录权限失败: %w", err)
+			}
+		}
+		return ensureNotifySocketDirWritable(dir)
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("检查 natmap notify 运行目录失败: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("创建 natmap notify 运行目录失败: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("设置 natmap notify 运行目录权限失败: %w", err)
+	}
+	return nil
+}
+
+func ensureNotifySocketDirWritable(dir string) error {
+	probe, err := os.CreateTemp(dir, ".notify-write-test-*")
+	if err != nil {
+		return fmt.Errorf("natmap notify 运行目录不可写: %w", err)
+	}
+	probePath := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(probePath)
+		return fmt.Errorf("关闭 natmap notify 运行目录写入探针失败: %w", err)
+	}
+	if err := os.Remove(probePath); err != nil {
+		return fmt.Errorf("清理 natmap notify 运行目录写入探针失败: %w", err)
+	}
+	return nil
+}
+
+func buildUPnPConfig(cfg config.Config) upnp.Config {
+	return upnp.Config{
+		Port:          cfg.Network.BindPort,
+		LeaseDuration: uint32(cfg.UPnP.LeaseDuration),
+		Description:   cfg.UPnP.Description,
+	}
 }

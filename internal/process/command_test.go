@@ -43,6 +43,55 @@ func TestOSRunnerStartAndStop(t *testing.T) {
 	assertDoneClosed(t, proc.Done())
 }
 
+func TestOSRunnerContextCancelDoesNotKillProcessBeforeStop(t *testing.T) {
+	readyPath := filepath.Join(t.TempDir(), "ready")
+	if os.Getenv("HATH_PROCESS_CONTEXT_HELPER") == "1" {
+		ignoreTerminationSignals()
+		if err := os.WriteFile(os.Getenv("HATH_PROCESS_READY_FILE"), []byte("ready"), 0o600); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "write ready file: %v\n", err)
+			os.Exit(2)
+		}
+		select {}
+	}
+
+	runner := OSRunner{}
+	startCtx, cancelStart := context.WithCancel(context.Background())
+	proc, err := runner.Start(startCtx, Spec{
+		Name: "context-helper",
+		Path: os.Args[0],
+		Args: []string{"-test.run=TestOSRunnerContextCancelDoesNotKillProcessBeforeStop"},
+		Env: []string{
+			"HATH_PROCESS_CONTEXT_HELPER=1",
+			"HATH_PROCESS_READY_FILE=" + readyPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+		defer cleanupCancel()
+		_ = proc.Stop(cleanupCtx)
+	})
+	waitForHelperReady(t, readyPath)
+
+	cancelStart()
+
+	select {
+	case <-proc.Done():
+		t.Fatal("process exited after start context cancellation before Stop()")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelStop()
+	err = proc.Stop(stopCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop() error = %v, want context deadline exceeded", err)
+	}
+	assertDoneClosed(t, proc.Done())
+}
+
 func TestOSRunnerStartMissingPathIncludesProcessName(t *testing.T) {
 	runner := OSRunner{}
 	_, err := runner.Start(context.Background(), Spec{

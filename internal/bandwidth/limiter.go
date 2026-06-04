@@ -122,7 +122,7 @@ func (l *Limiter) Clear(ctx context.Context) error {
 	runner := l.runner()
 	state, _, err := l.inspectRootQdisc(ctx, runner)
 	if err != nil {
-		return nil
+		return err
 	}
 	if state != rootQdiscOwned {
 		l.applied = false

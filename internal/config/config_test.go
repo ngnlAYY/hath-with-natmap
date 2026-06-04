@@ -578,6 +578,25 @@ func TestValidateRejectsInvalidNatmapUDPCheckCycle(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsInvalidNatmapKeepaliveIntervalPrecision(t *testing.T) {
+	tests := []string{"500ms", "1500ms"}
+	for _, keepaliveInterval := range tests {
+		t.Run(keepaliveInterval, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgText := strings.Replace(validConfigYAML(t, dir), "keepalive_interval: 15s", "keepalive_interval: "+keepaliveInterval, 1)
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+				t.Fatalf("写入配置失败: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), "natmap.keepalive_interval") {
+				t.Fatalf("Load() error = %v, want natmap.keepalive_interval validation error", err)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsNegativeHathMaxConnection(t *testing.T) {
 	dir := t.TempDir()
 	cfgText := strings.Replace(validConfigYAML(t, dir), `rpc_server_ip: ""`, "rpc_server_ip: \"\"\n  max_connection: -1", 1)

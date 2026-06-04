@@ -46,7 +46,11 @@ type osProcess struct {
 }
 
 func (r OSRunner) Start(ctx context.Context, spec Spec) (Process, error) {
-	cmd := exec.CommandContext(ctx, spec.Path, spec.Args...)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("启动进程 %q 失败: %w", spec.Name, err)
+	}
+
+	cmd := exec.Command(spec.Path, spec.Args...)
 	cmd.Dir = spec.Dir
 	cmd.Env = append(os.Environ(), spec.Env...)
 	cmd.Stdout, cmd.Stderr = r.outputWriters(spec.Name)

@@ -38,7 +38,7 @@ natmap:
   stun_server: stun.nextcloud.com:3478
   # TCP keepalive 目标地址，对应 natmap -h。
   http_keepalive_server: www.baidu.com:80
-  # keepalive 间隔，对应 natmap -k。
+  # keepalive 间隔，对应 natmap -k；必须至少为 1s 且为整秒。
   keepalive_interval: 15s
   # natmap 映射变化时调用的 notify 脚本；由编排器控制，不建议修改。
   notify_script: /usr/local/bin/natmap-notify.sh

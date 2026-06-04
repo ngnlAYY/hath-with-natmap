@@ -329,8 +329,9 @@ func TestClearRetainsAppliedWhenRootQdiscCheckFails(t *testing.T) {
 	}
 	limiter := Limiter{Runner: fake, Interface: "eth0", applied: true}
 
-	if err := limiter.Clear(context.Background()); err != nil {
-		t.Fatalf("first Clear() error = %v, want nil", err)
+	err := limiter.Clear(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "检查 root qdisc 失败") {
+		t.Fatalf("first Clear() error = %v, want root qdisc inspection error", err)
 	}
 	if err := limiter.Clear(context.Background()); err != nil {
 		t.Fatalf("second Clear() error = %v", err)

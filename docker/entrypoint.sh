@@ -31,12 +31,12 @@ fi
 
 if [ "${SKIP_CHOWN:-}" != "1" ]; then
   if [ "$(stat -c '%u:%g' /data/hath)" != "$target_uid:$target_gid" ]; then
-    find /data/hath -xdev -exec chown -h hath:hath {} \;
+    find /data/hath -xdev -exec chown -h hath:hath {} +
   fi
 fi
 
 if [ "$(stat -c '%u:%g' /run/hath-natmap)" != "$target_uid:$target_gid" ]; then
-  find /run/hath-natmap -xdev -exec chown -h hath:hath {} \;
+  find /run/hath-natmap -xdev -exec chown -h hath:hath {} +
 fi
 
 exec su-exec hath:hath "$@"

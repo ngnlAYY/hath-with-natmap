@@ -70,7 +70,7 @@ natmap:
 
 - `stun_server`：用于探测 NAT 映射的 STUN 服务，对应 `natmap -s`。
 - `http_keepalive_server`：用于 keepalive 的 TCP 目标，对应 `natmap -h`。
-- `keepalive_interval`：natmap keepalive 间隔，对应 `natmap -k`。
+- `keepalive_interval`：natmap keepalive 间隔，对应 `natmap -k`；必须至少为 `1s` 且为整秒。
 - `address_family`：地址族，只能是 `ipv4` 或 `ipv6`；默认 `ipv4`，分别对应 `-4` 或 `-6`。
 - `udp_mode`：是否启用 UDP 模式；默认 `false`，为 `true` 时传递 `-u`。
 - `interface`：可选网卡名或源 IP；默认空，不传递；非空时对应 `-i`。
@@ -151,11 +151,13 @@ bandwidth:
   enabled: false
   upload_limit: 10mbit
   interface: eth0
+  allow_replace_root_qdisc: false
 ```
 
 - `enabled`：是否启用上传限速。
 - `upload_limit`：上传限速值，支持 `bit`、`kbit`、`mbit`、`gbit`。
 - `interface`：应用 `tc` 规则的出口网卡。
+- `allow_replace_root_qdisc`：是否允许覆盖目标网卡已有 root qdisc；默认 `false`，避免误覆盖宿主机或外部维护的 `tc` 规则。
 
 启用后会通过 `tc` 对 `network.bind_port` 的出站流量配置上传限速。容器运行时必须授予 `NET_ADMIN` capability。
 

@@ -78,15 +78,15 @@ environment:
 -e PUID="$(id -u)" -e PGID="$(id -g)"
 ```
 
-未设置 `PUID`/`PGID` 时，镜像使用内置的 `hath` 用户和组。`PUID`/`PGID` 必须是非 0 数字。容器启动时会检查 `/data/hath` 和 `/run/hath-natmap` 的属主；只有属主不匹配时才会在当前文件系统内修正权限，且不会跟随符号链接。若设置 `SKIP_CHOWN=1`，启动脚本会跳过 `/data/hath` 的递归 chown；请先确认宿主机挂载目录已经允许目标 UID/GID 写入。`/run/hath-natmap` 是容器内运行时目录，仍会在启动时修正属主以保证 notify socket 可写。
+未设置 `PUID`/`PGID` 时，镜像使用内置的 `hath` 用户和组。`PUID`/`PGID` 必须是非 0 数字。容器启动时会检查 `/data/hath` 和 `/run/hath-natmap` 的属主；只有属主不匹配时才会在当前文件系统内修正权限，且不会跟随符号链接。若设置 `SKIP_CHOWN=1`，启动脚本会跳过 `/data/hath` 的递归 chown；请先确认宿主机挂载目录已经允许目标 UID/GID 写入。`/run/hath-natmap` 是容器内运行时目录，仍会在启动时修正属主以保证 notify socket 可写。若通过 `HATH_NATMAP_NOTIFY_SOCKET` 自定义 notify socket 路径，建议将父目录设置为当前运行用户独占，避免其他本地用户删除或占用 socket 文件。
 
 ## 支持平台
 
-Dockerfile 和 CI 显式支持：
+当前优化范围只覆盖 Linux x86-64：
 
 - `linux/amd64`
-- `linux/arm64`
-- `linux/arm/v7`
+
+`linux/arm64`、`linux/arm/v7` 和非 Linux 平台暂不作为当前发布目标。
 
 ## GitHub Actions
 

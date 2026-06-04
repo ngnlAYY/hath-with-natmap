@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -276,6 +278,83 @@ func TestBuildUpdaterHTTPClientReturnsErrorForInvalidDefaultTransport(t *testing
 			t.Fatalf("buildUpdaterHTTPClient returned nil error, want error")
 		}
 	})
+}
+
+func TestEnsureNotifySocketDirUsesConfiguredSocketParent(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "custom", "notify.sock")
+
+	if err := ensureNotifySocketDir(socketPath); err != nil {
+		t.Fatalf("ensureNotifySocketDir() error = %v", err)
+	}
+
+	info, err := os.Stat(filepath.Dir(socketPath))
+	if err != nil {
+		t.Fatalf("socket parent stat error = %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("socket parent is not a directory")
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("socket parent mode = %o, want 700", got)
+	}
+}
+
+func TestEnsureNotifySocketDirDoesNotChmodExistingParent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "custom")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("Mkdir() error = %v", err)
+	}
+
+	if err := ensureNotifySocketDir(filepath.Join(dir, "notify.sock")); err != nil {
+		t.Fatalf("ensureNotifySocketDir() error = %v", err)
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("socket parent stat error = %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("socket parent mode = %o, want 755", got)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("socket parent read error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("socket parent entries = %#v, want none", entries)
+	}
+}
+
+func TestEnsureNotifySocketDirRejectsFileParent(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "not-dir")
+	if err := os.WriteFile(parent, []byte("file"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	err := ensureNotifySocketDir(filepath.Join(parent, "notify.sock"))
+	if err == nil || !strings.Contains(err.Error(), "不是目录") {
+		t.Fatalf("ensureNotifySocketDir() error = %v, want not directory error", err)
+	}
+}
+
+func TestBuildUPnPConfigUsesBindPortLeaseAndDescription(t *testing.T) {
+	cfg := config.Config{
+		Network: config.NetworkConfig{BindPort: 4567},
+		UPnP: config.UPnPConfig{
+			LeaseDuration: 30,
+			Description:   "upnp-test",
+		},
+	}
+
+	got := buildUPnPConfig(cfg)
+	want := upnp.Config{
+		Port:          4567,
+		LeaseDuration: 30,
+		Description:   "upnp-test",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildUPnPConfig() = %#v, want %#v", got, want)
+	}
 }
 
 func TestBuildRuntimeWiresWhitelistConfig(t *testing.T) {

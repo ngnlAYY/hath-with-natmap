@@ -101,5 +101,5 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64
           tags: taskmgr818/hath-with-natter:latest

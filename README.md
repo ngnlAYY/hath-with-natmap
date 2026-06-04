@@ -1,6 +1,6 @@
-# hath-with-natmap
+# hath-with-natter
 
-`hath-with-natmap` 是一个 Docker-only 编排器，用于在全锥型 NAT 网络中运行 `hath-rust`。它使用 `natmap` 获取公网映射端口，自动更新 Hentai@Home 设置页，并在需要时启动或重启 `hath-rust`。
+`hath-with-natter` 是一个 Docker-only 编排器，用于在全锥型 NAT 网络中运行 `hath-rust`。它使用 `natmap` 获取公网映射端口，自动更新 Hentai@Home 设置页，并在需要时启动或重启 `hath-rust`。
 
 ## 特性
 

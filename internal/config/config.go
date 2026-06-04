@@ -196,8 +196,8 @@ func (c Config) Validate() error {
 		if err := requireString("natmap.http_keepalive_server", c.Natmap.HTTPKeepaliveServer); err != nil {
 			return err
 		}
-		if c.Natmap.KeepaliveInterval.Duration <= 0 {
-			return fmt.Errorf("natmap.keepalive_interval 必须大于 0")
+		if c.Natmap.KeepaliveInterval.Duration < time.Second || c.Natmap.KeepaliveInterval.Duration%time.Second != 0 {
+			return fmt.Errorf("natmap.keepalive_interval 必须至少为 1s 且为整秒")
 		}
 		if err := requireString("natmap.notify_script", c.Natmap.NotifyScript); err != nil {
 			return err
