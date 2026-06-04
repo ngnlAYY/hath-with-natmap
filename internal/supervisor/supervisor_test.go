@@ -118,6 +118,8 @@ type fakeNatmapProcess struct {
 	stopHadDeadline bool
 	done            chan error
 	err             error
+	startErrs       []error
+	startTimes      []time.Time
 }
 
 func newFakeNatmapProcess() *fakeNatmapProcess {
@@ -128,6 +130,12 @@ func (f *fakeNatmapProcess) Start(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts++
+	f.startTimes = append(f.startTimes, time.Now())
+	if len(f.startErrs) > 0 {
+		err := f.startErrs[0]
+		f.startErrs = f.startErrs[1:]
+		return err
+	}
 	return f.err
 }
 
@@ -147,6 +155,12 @@ func (f *fakeNatmapProcess) startCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.starts
+}
+
+func (f *fakeNatmapProcess) startTimesSnapshot() []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.startTimes...)
 }
 
 func (f *fakeNatmapProcess) stopCount() int {
@@ -204,12 +218,13 @@ func TestRuntimeRunRetriesNatmapStartFailureUntilContextCancel(t *testing.T) {
 	natmapProc := newFakeNatmapProcess()
 	natmapProc.err = errors.New("start failed")
 	runtime := Runtime{
-		Natmap:     natmapProc,
-		Hath:       &fakeHath{},
-		Updater:    &fakeUpdater{},
-		Events:     make(chan natmap.Mapping),
-		BindPort:   7000,
-		RetryDelay: time.Millisecond,
+		Natmap:        natmapProc,
+		Hath:          &fakeHath{},
+		Updater:       &fakeUpdater{},
+		Events:        make(chan natmap.Mapping),
+		BindPort:      7000,
+		RetryDelay:    time.Millisecond,
+		RetryMaxDelay: 4 * time.Millisecond,
 	}
 	runDone := make(chan error, 1)
 	go func() {
@@ -217,6 +232,84 @@ func TestRuntimeRunRetriesNatmapStartFailureUntilContextCancel(t *testing.T) {
 	}()
 
 	waitUntil(t, func() bool { return natmapProc.startCount() >= 2 })
+	cancel()
+	if err := waitForRun(t, runDone); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestRuntimeNextRetryDelayDoublesUntilMax(t *testing.T) {
+	runtime := Runtime{RetryDelay: 5 * time.Millisecond, RetryMaxDelay: 20 * time.Millisecond}
+
+	if got := runtime.nextRetryDelay(0); got != 5*time.Millisecond {
+		t.Fatalf("nextRetryDelay(0) = %s, want %s", got, 5*time.Millisecond)
+	}
+	if got := runtime.nextRetryDelay(5 * time.Millisecond); got != 10*time.Millisecond {
+		t.Fatalf("nextRetryDelay(initial) = %s, want %s", got, 10*time.Millisecond)
+	}
+	if got := runtime.nextRetryDelay(10 * time.Millisecond); got != 20*time.Millisecond {
+		t.Fatalf("nextRetryDelay(double) = %s, want %s", got, 20*time.Millisecond)
+	}
+	if got := runtime.nextRetryDelay(20 * time.Millisecond); got != 20*time.Millisecond {
+		t.Fatalf("nextRetryDelay(max) = %s, want %s", got, 20*time.Millisecond)
+	}
+}
+
+func TestRuntimeNextRetryDelayUsesInitialWhenMaxIsUnsetOrSmaller(t *testing.T) {
+	tests := []struct {
+		name          string
+		retryDelay    time.Duration
+		retryMaxDelay time.Duration
+		current       time.Duration
+		want          time.Duration
+	}{
+		{name: "max unset keeps fixed delay", retryDelay: 5 * time.Millisecond, current: 5 * time.Millisecond, want: 5 * time.Millisecond},
+		{name: "max smaller than initial uses initial", retryDelay: 20 * time.Millisecond, retryMaxDelay: 10 * time.Millisecond, current: 20 * time.Millisecond, want: 20 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtime := Runtime{RetryDelay: tt.retryDelay, RetryMaxDelay: tt.retryMaxDelay}
+			if got := runtime.nextRetryDelay(tt.current); got != tt.want {
+				t.Fatalf("nextRetryDelay(%s) = %s, want %s", tt.current, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeRunResetsRetryDelayAfterSuccessfulStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	natmapProc := newFakeNatmapProcess()
+	natmapProc.startErrs = []error{errors.New("start failed"), nil, errors.New("start failed"), nil}
+	runtime := Runtime{
+		Natmap:        natmapProc,
+		Hath:          &fakeHath{},
+		Updater:       &fakeUpdater{},
+		Events:        make(chan natmap.Mapping),
+		BindPort:      7000,
+		RetryDelay:    40 * time.Millisecond,
+		RetryMaxDelay: 160 * time.Millisecond,
+	}
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- runtime.Run(ctx)
+	}()
+
+	waitUntil(t, func() bool { return natmapProc.startCount() >= 2 })
+	natmapProc.done <- errors.New("natmap exited")
+	waitUntil(t, func() bool { return natmapProc.startCount() >= 4 })
+
+	startTimes := natmapProc.startTimesSnapshot()
+	if len(startTimes) < 4 {
+		t.Fatalf("startTimes = %d, want at least 4", len(startTimes))
+	}
+	firstRetryDelay := startTimes[1].Sub(startTimes[0])
+	resetRetryDelay := startTimes[3].Sub(startTimes[2])
+	if resetRetryDelay >= 70*time.Millisecond {
+		t.Fatalf("retry delay after successful start = %s, want reset near initial delay instead of doubled from previous cycle (first retry %s)", resetRetryDelay, firstRetryDelay)
+	}
+
 	cancel()
 	if err := waitForRun(t, runDone); err != nil {
 		t.Fatalf("Run returned error: %v", err)

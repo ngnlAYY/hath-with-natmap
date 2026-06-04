@@ -68,6 +68,8 @@ docker run --rm \
 environment:
   PUID: "1000"
   PGID: "1000"
+  # 可选：宿主机 hath 数据目录权限已正确设置时，跳过 /data/hath 递归 chown。
+  # SKIP_CHOWN: "1"
 ```
 
 也可以直接使用当前宿主机用户：
@@ -76,7 +78,7 @@ environment:
 -e PUID="$(id -u)" -e PGID="$(id -g)"
 ```
 
-未设置 `PUID`/`PGID` 时，镜像使用内置的 `hath` 用户和组。`PUID`/`PGID` 必须是非 0 数字。容器启动时会检查 `/data/hath` 和 `/run/hath-natmap` 的属主；只有属主不匹配时才会在当前文件系统内修正权限，且不会跟随符号链接。
+未设置 `PUID`/`PGID` 时，镜像使用内置的 `hath` 用户和组。`PUID`/`PGID` 必须是非 0 数字。容器启动时会检查 `/data/hath` 和 `/run/hath-natmap` 的属主；只有属主不匹配时才会在当前文件系统内修正权限，且不会跟随符号链接。若设置 `SKIP_CHOWN=1`，启动脚本会跳过 `/data/hath` 的递归 chown；请先确认宿主机挂载目录已经允许目标 UID/GID 写入。`/run/hath-natmap` 是容器内运行时目录，仍会在启动时修正属主以保证 notify socket 可写。
 
 ## 支持平台
 

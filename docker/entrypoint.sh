@@ -29,10 +29,14 @@ if [ "${PUID:-}" != "" ] || [ "${PGID:-}" != "" ]; then
   usermod -o -u "$target_uid" -g "$target_gid" hath
 fi
 
-for path in /data/hath /run/hath-natmap; do
-  if [ "$(stat -c '%u:%g' "$path")" != "$target_uid:$target_gid" ]; then
-    find "$path" -xdev -exec chown -h hath:hath {} \;
+if [ "${SKIP_CHOWN:-}" != "1" ]; then
+  if [ "$(stat -c '%u:%g' /data/hath)" != "$target_uid:$target_gid" ]; then
+    find /data/hath -xdev -exec chown -h hath:hath {} \;
   fi
-done
+fi
+
+if [ "$(stat -c '%u:%g' /run/hath-natmap)" != "$target_uid:$target_gid" ]; then
+  find /run/hath-natmap -xdev -exec chown -h hath:hath {} \;
+fi
 
 exec su-exec hath:hath "$@"

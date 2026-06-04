@@ -72,7 +72,7 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("加载配置失败: %w", err)
 	}
 
-	clearBandwidth, err := applyBandwidthLimit(ctx, cfg, bandwidth.Limiter{Interface: cfg.Bandwidth.Interface, UploadLimit: cfg.Bandwidth.UploadLimit}, bandwidth.CheckNETAdmin)
+	clearBandwidth, err := applyBandwidthLimit(ctx, cfg, buildBandwidthLimiter(cfg), bandwidth.CheckNETAdmin)
 	if err != nil {
 		return err
 	}
@@ -125,9 +125,20 @@ func run(ctx context.Context, args []string) error {
 	return nil
 }
 
+func buildBandwidthLimiter(cfg config.Config) bandwidth.Limiter {
+	return bandwidth.Limiter{
+		Interface:             cfg.Bandwidth.Interface,
+		UploadLimit:           cfg.Bandwidth.UploadLimit,
+		AllowReplaceRootQdisc: cfg.Bandwidth.AllowReplaceRootQdisc,
+	}
+}
+
 func buildUpdaterHTTPClient(cfg config.Config) (*http.Client, error) {
 	client := &http.Client{Timeout: cfg.Network.ExternalUpdateTimeout.Duration}
-	transport := &http.Transport{}
+	transport, err := cloneDefaultHTTPTransport()
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Proxy.Enabled {
 		transport.Proxy = nil
 		client.Transport = transport
@@ -141,6 +152,20 @@ func buildUpdaterHTTPClient(cfg config.Config) (*http.Client, error) {
 	transport.Proxy = http.ProxyURL(proxyURL)
 	client.Transport = transport
 	return client, nil
+}
+
+func cloneDefaultHTTPTransport() (*http.Transport, error) {
+	if http.DefaultTransport == nil {
+		return nil, fmt.Errorf("默认 HTTP transport 为空，无法克隆")
+	}
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("默认 HTTP transport 类型为 %T，无法克隆", http.DefaultTransport)
+	}
+	if transport == nil {
+		return nil, fmt.Errorf("默认 HTTP transport 为空，无法克隆")
+	}
+	return transport.Clone(), nil
 }
 
 func runUPnPModeOnce(ctx context.Context, cfg config.Config, hathController supervisor.HathController, updater supervisor.PortUpdater, mapper upnpMapper) (func(), error) {
@@ -180,7 +205,6 @@ func runUPnPModeOnce(ctx context.Context, cfg config.Config, hathController supe
 }
 
 func upnpOperationContext(cfg config.Config) (context.Context, context.CancelFunc) {
-	// 避免父 ctx 在路由器已写入映射后中断响应，导致调用方无法确认并清理该映射。
 	return context.WithTimeout(context.Background(), cfg.Runtime.ShutdownTimeout.Duration)
 }
 
@@ -308,6 +332,7 @@ func buildRuntime(cfg config.Config, listener *natmap.Listener, events <-chan na
 		Events:          events,
 		BindPort:        cfg.Network.BindPort,
 		RetryDelay:      cfg.Runtime.Retry.InitialDelay.Duration,
+		RetryMaxDelay:   cfg.Runtime.Retry.MaxDelay.Duration,
 		RestartDelay:    cfg.Runtime.RestartDelay.Duration,
 		ShutdownTimeout: cfg.Runtime.ShutdownTimeout.Duration,
 	}

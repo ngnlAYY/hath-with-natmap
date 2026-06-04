@@ -43,16 +43,48 @@ tc filter show dev eth0
 
 将 `eth0` 替换为配置中的网卡名。
 
+## root qdisc 保护
+
+启动限速前，程序会先执行：
+
+```bash
+tc qdisc show dev eth0
+```
+
+以下情况会视为安全并继续执行 `replace`：
+
+- 当前没有 qdisc 输出
+- 当前为 `qdisc noqueue`
+
+如果检测到已有 root qdisc，默认会直接失败，避免覆盖宿主机或外部维护的 tc 规则。即使当前 root qdisc 看起来也是 `qdisc htb 1:`，程序也无法可靠证明它由本项目创建，因此仍需要显式开启：
+
+```yaml
+bandwidth:
+  allow_replace_root_qdisc: true
+```
+
+只有在你确认目标网卡上的现有 root qdisc 可以被本程序替换时，才应启用这个开关。完整示例：
+
+```yaml
+bandwidth:
+  enabled: true
+  upload_limit: 10mbit
+  interface: eth0
+  allow_replace_root_qdisc: true
+```
+
 ## 清理规则
 
-程序正常退出时会尝试删除目标网卡上的 root qdisc：
+程序正常退出时只会在本进程已经成功应用限速，且当前 root qdisc 仍然是带有本项目专用 `default 3fed` 标记的 `qdisc htb 1:` 时，才尝试删除：
 
 ```bash
 tc qdisc del dev eth0 root
 ```
 
-如果容器被强制杀死，规则可能残留。可以在宿主机上手动执行同一条命令清理。
+如果检测到外部 root qdisc，或当前 runner 无法确认 qdisc 归属，程序会跳过删除，避免误删其它 tc 规则。
+
+如果容器被强制杀死，规则可能残留。可以在宿主机确认归属后再手动执行同一条命令清理。
 
 ## 注意事项
 
-当前规则会在目标网卡上设置 root qdisc。不要在已经手工维护复杂 `tc` 规则的网卡上直接启用此功能。
+当前规则会在目标网卡上设置 root qdisc。默认保护只能减少误覆盖风险，不能替代你对宿主机 tc 规则现状的确认。

@@ -97,6 +97,23 @@ func TestLoadOldConfigWithoutExternalUpdateTimeoutStillLoads(t *testing.T) {
 	}
 }
 
+func TestLoadBandwidthAllowReplaceRootQdisc(t *testing.T) {
+	dir := t.TempDir()
+	cfgText := strings.Replace(validConfigYAML(t, dir), "  interface: eth0\n", "  interface: eth0\n  allow_replace_root_qdisc: true\n", 1)
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Bandwidth.AllowReplaceRootQdisc {
+		t.Fatal("Bandwidth.AllowReplaceRootQdisc = false, want true")
+	}
+}
+
 func TestLoadParameterWhitelistConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgText := strings.Replace(validConfigYAML(t, dir), "notify_script: /usr/local/bin/natmap-notify.sh", `notify_script: /usr/local/bin/natmap-notify.sh

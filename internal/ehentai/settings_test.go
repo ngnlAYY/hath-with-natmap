@@ -89,7 +89,7 @@ func TestUpdatePortPostsExistingFieldsWithNewPort(t *testing.T) {
 			}
 			postedPort = r.Form.Get("f_port")
 			postedName = r.Form.Get("name")
-			fmt.Fprint(w, "ok")
+			fmt.Fprint(w, `<input name="f_port" value="45678"><input name="name" value="client">`)
 		default:
 			t.Fatalf("method = %s, want GET or POST", r.Method)
 		}
@@ -117,6 +117,26 @@ func TestUpdatePortPostsExistingFieldsWithNewPort(t *testing.T) {
 	}
 	if gotContentType != "application/x-www-form-urlencoded" {
 		t.Fatalf("Content-Type = %q, want application/x-www-form-urlencoded", gotContentType)
+	}
+}
+
+func TestUpdatePortReturnsErrorWhenPostedPortIsNotConfirmed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			fmt.Fprint(w, `<input name="f_port" value="1111"><input name="name" value="client">`)
+		case http.MethodPost:
+			fmt.Fprint(w, `<input name="f_port" value="1111"><input name="name" value="client">`)
+		default:
+			t.Fatalf("method = %s, want GET or POST", r.Method)
+		}
+	}))
+	defer server.Close()
+
+	client := Client{HTTPClient: server.Client(), BaseURL: server.URL, MemberID: "123", PassHash: "pass", ClientID: "999"}
+	err := client.UpdatePort(context.Background(), 45678)
+	if err == nil || !strings.Contains(err.Error(), "确认 Hentai@Home 端口更新失败") {
+		t.Fatalf("UpdatePort() error = %v, want confirmation failure", err)
 	}
 }
 

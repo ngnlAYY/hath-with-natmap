@@ -97,6 +97,8 @@ bandwidth:
   upload_limit: 10mbit
   # 应用 tc 规则的出口网卡。
   interface: eth0
+  # 是否允许覆盖现有 root qdisc；默认 false，避免误覆盖宿主机或外部维护的 tc 规则。
+  allow_replace_root_qdisc: false
 
 # 编排器运行时超时和重试配置。
 runtime:
